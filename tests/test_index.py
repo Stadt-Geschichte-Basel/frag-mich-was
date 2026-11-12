@@ -174,7 +174,7 @@ def test_chunk_without_url_is_valid() -> None:
     assert Chunk(**chunk_data()).url is None
 
 
-# Ranking (A5)
+# Ranking
 
 
 def test_rank_scores_an_equal_vector_as_one() -> None:
@@ -463,16 +463,83 @@ def test_sgb_import(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import_sgb.main()
     output = tmp_path / "content" / "sgb-01.md"
     first = output.read_text()
+    stale = output.parent / "sgb-old.md"
+    stale.write_text("Old chapter")
+    unrelated = output.parent / "notes.md"
+    unrelated.write_text("Keep this file")
     import_sgb.main()
+    assert not stale.exists()
+    assert unrelated.read_text() == "Keep this file"
     assert first == output.read_text()
     assert "Wort." in first and "Note" not in first and "## Titel" in first
     assert parse_document(output.name, first).url == "https://doi.org/10.21255/example"
     chapter.write_text(metadata + "<main></main>")
     with pytest.raises(ValueError, match="empty main"):
         import_sgb.convert(chapter)
+    stale.write_text("Keep until all sources validate")
+    with pytest.raises(ValueError, match="empty main"):
+        import_sgb.main()
+    assert stale.exists() and output.read_text() == first
     chunks = [
         Chunk(**chunk_data(id=str(n), url=f"https://doi.org/10.1/{n // 2}")) for n in range(12)
     ]
     assert len(rank([0.6, 0.8], chunks)) == 5
     assert len({chunk.url for chunk, _ in rank([0.6, 0.8], chunks)}) == 5
     assert [chunk.id for chunk, _ in rank([0.6, 0.8], chunks)] == ["0", "10", "2", "4", "6"]
+
+
+def test_import_skips_void_elements_without_losing_chapter_tail() -> None:
+    from scripts.import_sgb import VOID_ELEMENTS, ChapterHTML
+
+    for tag in sorted(VOID_ELEMENTS):
+        for marker in (f"<{tag}>", f"<{tag}/>", f"<{tag}></{tag}>"):
+            for opening, closing in (
+                ('<section role="doc-endnotes"><p>', "</p></section>"),
+                ('<sup id="ref-fn1">', "</sup>"),
+            ):
+                parser = ChapterHTML()
+                parser.feed(f"<main><p>A</p>{opening}Note{marker}note{closing}<p>TAIL</p></main>")
+                assert parser.body() == "A\n\nTAIL", (tag, marker, opening)
+
+
+def test_export_site_prepares_metadata_and_preserves_output_on_export_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+
+    from scripts import export_site
+
+    monkeypatch.setattr(export_site, "ROOT", tmp_path)
+    output = tmp_path / "dist" / "index.html"
+    raw = '<html lang="en"><head><meta name="theme-color" content="#000000"/><meta name="theme-color" content="#3a1e3e"></head></html>'
+
+    def export(command: list[str], *, cwd: Path, check: bool) -> None:
+        assert cwd == tmp_path and check
+        assert command[1:] == [
+            "-m",
+            "marimo",
+            "export",
+            "html-wasm",
+            "app.py",
+            "-o",
+            "dist",
+            "--mode",
+            "run",
+        ]
+        output.parent.mkdir()
+        output.write_text(raw, encoding="utf-8")
+
+    monkeypatch.setattr(export_site.subprocess, "run", export)
+    export_site.main()
+    prepared = output.read_text(encoding="utf-8")
+    assert '<html lang="de-CH">' in prepared
+    assert prepared.count('name="theme-color"') == 1
+    assert 'content="#3a1e3e"' in prepared
+
+    def fail(command: list[str], *, cwd: Path, check: bool) -> None:
+        raise subprocess.CalledProcessError(1, command)
+
+    monkeypatch.setattr(export_site.subprocess, "run", fail)
+    with pytest.raises(subprocess.CalledProcessError):
+        export_site.main()
+    assert output.read_text(encoding="utf-8") == prepared

@@ -2,8 +2,7 @@
 
 These tests need the export in ``dist/``, the Playwright browsers, and network access::
 
-    uv run marimo export html-wasm app.py -o dist --mode run
-    uv run python -m scripts.prepare_site
+    uv run python -m scripts.export_site
     uv run playwright install chromium firefox
     uv run pytest -m browser --no-cov
 """
@@ -45,7 +44,7 @@ class QuietHandler(SimpleHTTPRequestHandler):
 def site(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     """Serve ``dist/`` below ``/frag-mich-was/``, as GitHub Pages does."""
     if not (DIST / "index.html").exists():
-        pytest.fail("dist/index.html is missing. Run the marimo export first.")
+        pytest.fail("dist/index.html is missing. Run `uv run python -m scripts.export_site` first.")
     root = tmp_path_factory.mktemp("pages")
     (root / "frag-mich-was").symlink_to(DIST, target_is_directory=True)
     handler = partial(QuietHandler, directory=str(root))
@@ -87,7 +86,7 @@ def is_allowed(host: str) -> bool:
 
 
 def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -> None:
-    """A1, A2, A3, and the empty query of A6."""
+    """Search by keyboard, preserve distinct chapters, and handle an empty query."""
     hosts: set[str] = set()
     errors: list[str] = []
     page = open_page(context, hosts, errors)
@@ -101,6 +100,14 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
     ).wait_for(timeout=LOAD_TIMEOUT)
 
     assert page.locator("html").get_attribute("lang") == "de-CH"
+    assert page.locator('meta[name="theme-color"]').count() == 1
+    assert page.locator('meta[name="theme-color"]').get_attribute("content") == "#3a1e3e"
+    assert (
+        page.get_by_role("heading", name="Frag mich was").evaluate(
+            "element => getComputedStyle(element).fontWeight"
+        )
+        == "600"
+    )
     assert page.get_by_role("status").filter(has_text="Du kannst").count() == 1
     logo = page.get_by_role("img", name="Stadt.Geschichte.Basel")
     assert logo.evaluate("image => image.complete && image.naturalWidth > 0")
@@ -201,7 +208,7 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
 
 
 def test_browser_vectors_match_python(context: BrowserContext, site: str) -> None:
-    """A4: the browser model and the Python model give the same vectors."""
+    """The browser model and the Python model give the same vectors."""
     page = context.new_page()
     page.goto(site)
     model = FIXTURE["model"]
@@ -245,7 +252,7 @@ def test_browser_vectors_match_python(context: BrowserContext, site: str) -> Non
 def test_bad_index_shows_message(
     context: BrowserContext, site: str, status: int, body: str, message: str
 ) -> None:
-    """A6: a missing, an invalid, and an empty index give a message and no search field."""
+    """A missing, invalid, or empty index gives a message and no search field."""
     errors: list[str] = []
     page = open_page(context, set(), errors)
     page.route("**/public/embeddings.json", lambda route: route.fulfill(status=status, body=body))
@@ -259,7 +266,7 @@ def test_bad_index_shows_message(
 
 
 def test_model_failure_shows_retry(context: BrowserContext, site: str) -> None:
-    """A6: a failed model download gives an error with a retry that works."""
+    """A failed model download gives an error with a retry that works."""
     assert context.browser is not None
     fresh = context.browser.new_context()  # An empty cache, so that the model must download.
     errors: list[str] = []

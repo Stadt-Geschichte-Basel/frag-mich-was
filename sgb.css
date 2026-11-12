@@ -17,7 +17,7 @@
   font-family: "Euclid Circular B";
   src: url("public/sgb/assets/fonts/EuclidCircularB-Semibold-WebS.woff2") format("woff2");
   font-style: normal;
-  font-weight: 600 900;
+  font-weight: 600;
   font-display: swap;
 }
 :root, .marimo {
@@ -53,7 +53,7 @@ body {
   height: auto;
   max-width: 100%;
 }
-h1 {
+h1, .markdown h1, .mo-markdown-renderer h1 {
   color: var(--sgb-purple);
   font-weight: 600;
   line-height: 1.2;

@@ -226,7 +226,7 @@ def render_results(results: Sequence[tuple[Chunk, float]]) -> str:
 
     >>> chunk = Chunk(id="a", title="<A>", text="x & y", source="a.md", embedding=[1.0])
     >>> render_results([(chunk, 0.5)])
-    '<p role="status" aria-atomic="true">1 passende Kapitel gefunden.</p><p>Die Suche zeigt passende Textstellen, keine automatisch generierten Antworten. Der Link führt zum Originalkapitel.</p><ol class="sgb-results" role="list"><li><h2>&lt;A&gt;</h2><p>x &amp; y</p></li></ol>'
+    '<p role="status" aria-atomic="true">1 passende Kapitel gefunden.</p><ol class="sgb-results" role="list"><li><h2>&lt;A&gt;</h2><p>x &amp; y</p></li></ol>'
     >>> render_results([])
     '<p role="status" aria-atomic="true">Keine Textstelle gefunden.</p>'
     """
@@ -247,8 +247,6 @@ def render_results(results: Sequence[tuple[Chunk, float]]) -> str:
         )
     return (
         f'<p role="status" aria-atomic="true">{len(results)} passende Kapitel gefunden.</p>'
-        "<p>Die Suche zeigt passende Textstellen, keine automatisch generierten Antworten. "
-        "Der Link führt zum Originalkapitel.</p>"
         f'<ol class="sgb-results" role="list">{"".join(items)}</ol>'
     )
 
@@ -381,7 +379,15 @@ async def _(form, index, retry, session):
         mo.output.replace(mo.Html('<p role="status">Suche läuft.</p>'))
         _vector = (await session["embed"](index.model.query_prefix + _query)).to_py()
         check_vector(_vector, index.model.dimensions)
-        _output = mo.Html(render_results(rank(_vector, index.chunks)))
+        _output = mo.vstack(
+            [
+                mo.md(
+                    "Die Suche zeigt passende Textstellen, keine automatisch generierten Antworten. "
+                    "Der Link führt zum Originalkapitel."
+                ),
+                mo.Html(render_results(rank(_vector, index.chunks))),
+            ]
+        )
     except Exception as _exc:
         _output = mo.vstack(
             [
