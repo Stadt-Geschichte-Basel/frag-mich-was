@@ -77,9 +77,11 @@ uv run marimo check app.py --select MW
 
 ```bash
 uv run marimo export html-wasm app.py -o dist --mode run
+uv run python -m scripts.prepare_site
 python -m http.server --directory dist 8000
 ```
 
+The preparation step sets the exported document language to `de-CH`.
 Open `http://localhost:8000/`. Do not open `dist/index.html` as a file.
 
 ## Browser tests
@@ -90,6 +92,7 @@ Run them before each release:
 
 ```bash
 uv run marimo export html-wasm app.py -o dist --mode run
+uv run python -m scripts.prepare_site
 uv run playwright install chromium firefox
 uv run pytest -m browser --no-cov
 ```

@@ -241,7 +241,9 @@ def test_render_results_links_only_when_url_is_set() -> None:
 
 
 def test_render_results_without_results() -> None:
-    assert render_results([]) == "<p>Keine Textstelle gefunden.</p>"
+    assert (
+        render_results([]) == '<p role="status" aria-atomic="true">Keine Textstelle gefunden.</p>'
+    )
 
 
 # Offline indexing: parse_document

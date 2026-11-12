@@ -39,6 +39,7 @@ jobs:
       - name: Export
         run: |
           uv run marimo export html-wasm app.py -o dist --mode run
+          uv run python -m scripts.prepare_site
           rm -f dist/CLAUDE.md
           test -s dist/index.html
           test -s dist/public/embeddings.json

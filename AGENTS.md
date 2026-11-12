@@ -50,6 +50,7 @@ Other commands:
 ```bash
 uv run --group index python -m scripts.build_index          # Build the index and the fixture.
 uv run marimo export html-wasm app.py -o dist --mode run    # Export the site.
+uv run python -m scripts.prepare_site
 uv run pytest -m browser --no-cov                           # Browser tests. They need dist/ and a network.
 ```
 
