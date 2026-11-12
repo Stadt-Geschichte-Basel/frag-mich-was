@@ -42,15 +42,15 @@ class QuietHandler(SimpleHTTPRequestHandler):
 
 @pytest.fixture(scope="module")
 def site(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
-    """Serve ``dist/`` below ``/moritz-says/``, as GitHub Pages does."""
+    """Serve ``dist/`` below ``/frag-mich-was/``, as GitHub Pages does."""
     if not (DIST / "index.html").exists():
         pytest.fail("dist/index.html is missing. Run the marimo export first.")
     root = tmp_path_factory.mktemp("pages")
-    (root / "moritz-says").symlink_to(DIST, target_is_directory=True)
+    (root / "frag-mich-was").symlink_to(DIST, target_is_directory=True)
     handler = partial(QuietHandler, directory=str(root))
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    yield f"http://localhost:{server.server_port}/moritz-says/"
+    yield f"http://localhost:{server.server_port}/frag-mich-was/"
     server.shutdown()
 
 
@@ -72,7 +72,7 @@ def open_page(context: BrowserContext, hosts: set[str], errors: list[str]) -> Pa
 
 def search(page: Page, query: str) -> None:
     page.get_by_role("textbox").fill(query)
-    page.get_by_role("button", name="Search").click()
+    page.get_by_role("button", name="Suchen").click()
 
 
 def is_allowed(host: str) -> bool:
@@ -86,12 +86,12 @@ def test_search_end_to_end(context: BrowserContext, site: str) -> None:
     errors: list[str] = []
     page = open_page(context, hosts, errors)
     page.goto(site)
-    page.get_by_text("Ready. The index holds").wait_for(timeout=LOAD_TIMEOUT)
+    page.get_by_text("Bereit. Der Index enthält").wait_for(timeout=LOAD_TIMEOUT)
     page.reload()
-    page.get_by_text("Ready. The index holds").wait_for(timeout=LOAD_TIMEOUT)
+    page.get_by_text("Bereit. Der Index enthält").wait_for(timeout=LOAD_TIMEOUT)
 
     search(page, "   ")
-    page.get_by_text("Write a query.").wait_for(timeout=LOAD_TIMEOUT)
+    page.get_by_text("Stelle eine Frage.").wait_for(timeout=LOAD_TIMEOUT)
     assert not any(host.endswith(ALLOWED_HOST_SUFFIXES) for host in hosts), "blank query"
 
     reference = FIXTURE["reference"]
@@ -100,10 +100,14 @@ def test_search_end_to_end(context: BrowserContext, site: str) -> None:
     items.first.wait_for(timeout=MODEL_TIMEOUT)
     texts = [" ".join(text.split()) for text in items.all_inner_texts()]
     assert 1 <= len(texts) <= 5
-    expected = next(chunk for chunk in INDEX.chunks if chunk.id == reference["expected_id"])
-    start = " ".join(expected.text.split())[:80]
-    assert any(start in text for text in texts[:3]), texts[:3]
+    expected = next(chunk for chunk in INDEX.chunks if chunk.url == reference["expected_url"])
+    assert expected.url in items.locator("a").evaluate_all(
+        "links => links.slice(0, 3).map(link => link.href)"
+    )
 
+    links = items.locator("a").evaluate_all("links => links.map(link => link.href)")
+    assert len(set(links)) == len(texts)
+    assert all(link.startswith("https://doi.org/") for link in links)
     assert not errors
     assert all(is_allowed(host) for host in hosts), sorted(hosts)
     page.close()
@@ -141,13 +145,13 @@ def test_browser_vectors_match_python(context: BrowserContext, site: str) -> Non
 @pytest.mark.parametrize(
     ("status", "body", "message"),
     [
-        (404, "not found", "The search is not available."),
-        (200, "{not json", "The search is not available."),
-        (200, json.dumps({"schema_version": 2}), "The search is not available."),
+        (404, "not found", "Die Suche ist nicht verfügbar."),
+        (200, "{not json", "Die Suche ist nicht verfügbar."),
+        (200, json.dumps({"schema_version": 2}), "Die Suche ist nicht verfügbar."),
         (
             200,
             json.dumps({"schema_version": 1, "model": FIXTURE["model"], "chunks": []}),
-            "The search index holds no passage.",
+            "Der Suchindex enthält keine Textstellen.",
         ),
     ],
 )
@@ -177,13 +181,13 @@ def test_model_failure_shows_retry(context: BrowserContext, site: str) -> None:
 
     page.route("https://huggingface.co/**", block)
     page.goto(site)
-    page.get_by_text("Ready. The index holds").wait_for(timeout=LOAD_TIMEOUT)
+    page.get_by_text("Bereit. Der Index enthält").wait_for(timeout=LOAD_TIMEOUT)
     search(page, FIXTURE["reference"]["query"])
-    page.get_by_text("The search failed.").wait_for(timeout=MODEL_TIMEOUT)
+    page.get_by_text("Die Suche ist fehlgeschlagen.").wait_for(timeout=MODEL_TIMEOUT)
     assert page.locator("ol li").count() == 0
 
     page.unroute("https://huggingface.co/**", block)
-    page.get_by_role("button", name="Retry").click()
+    page.get_by_role("button", name="Erneut versuchen").click()
     page.locator("ol li").first.wait_for(timeout=MODEL_TIMEOUT)
     assert not errors
     fresh.close()

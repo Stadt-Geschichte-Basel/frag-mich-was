@@ -13,7 +13,7 @@ from scripts.build_index import (
     FIXTURE_SENTENCES,
     INDEX_FILE,
     MODEL,
-    REFERENCE_EXPECTED_ID,
+    REFERENCE_EXPECTED_URL,
     REFERENCE_QUERY,
 )
 
@@ -42,12 +42,12 @@ def test_fixture_vectors_are_valid() -> None:
 def test_reference_query_finds_the_expected_passage() -> None:
     """A3: a query in other words finds the passage within the top three."""
     reference = FIXTURE["reference"]
-    assert (reference["query"], reference["expected_id"]) == (
+    assert (reference["query"], reference["expected_url"]) == (
         REFERENCE_QUERY,
-        REFERENCE_EXPECTED_ID,
+        REFERENCE_EXPECTED_URL,
     )
-    top = [chunk.id for chunk, _ in rank(reference["embedding"], INDEX.chunks, top_k=3)]
-    assert REFERENCE_EXPECTED_ID in top
+    top = [chunk.url for chunk, _ in rank(reference["embedding"], INDEX.chunks, top_k=3)]
+    assert REFERENCE_EXPECTED_URL in top
 
 
 def test_python_model_reproduces_the_fixture() -> None:

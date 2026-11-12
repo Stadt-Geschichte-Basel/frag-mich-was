@@ -1,6 +1,6 @@
-# Agents Tooling Specification — moritz-says
+# Agents Tooling Specification — Frag mich was
 
-This repository is a static semantic search page for the publications of Moritz Mähr. It is a marimo WebAssembly notebook on GitHub Pages.
+This repository is a static semantic search page for the chapters of Stadt.Geschichte.Basel. It is a marimo WebAssembly notebook on GitHub Pages.
 
 It follows the shared Python specification, `10-AGENTS.python.md`. `SPEC.md` is the product specification.
 Sections 1, 3, and 6 name only the tools that this repository uses.

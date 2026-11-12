@@ -1,7 +1,7 @@
 [project]
-name = "moritz-says"
+name = "frag-mich-was"
 version = "0.1.0"
-description = "Static semantic search over the publications of Moritz Mähr, with marimo WASM on GitHub Pages."
+description = "Static semantic search for Stadt.Geschichte.Basel with marimo WASM on GitHub Pages."
 readme = "README.md"
 license = "AGPL-3.0-only"
 requires-python = ">=3.12"

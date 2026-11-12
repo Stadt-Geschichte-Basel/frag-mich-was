@@ -1,7 +1,7 @@
 import marimo
 
 __generated_with = "0.25.2"
-app = marimo.App(width="medium", app_title="Moritz says")
+app = marimo.App(width="medium", app_title="Frag mich was")
 
 with app.setup:
     import html
@@ -201,7 +201,7 @@ def load_index(raw: str) -> SearchIndex:
 def rank(
     query: Sequence[float], chunks: Sequence[Chunk], top_k: int = TOP_K
 ) -> list[tuple[Chunk, float]]:
-    """Return the best chunks by dot product. Break a tie by chunk ID.
+    """Return each DOI’s best passage by dot product. Break a tie by chunk ID.
 
     The vectors have unit length, so the dot product is the cosine similarity.
 
@@ -212,7 +212,10 @@ def rank(
     """
     scored = [(chunk, math.sumprod(query, chunk.embedding)) for chunk in chunks]
     scored.sort(key=lambda pair: (-pair[1], pair[0].id))
-    return scored[:top_k]
+    distinct: dict[str, tuple[Chunk, float]] = {}
+    for chunk, score in scored:
+        distinct.setdefault(chunk.url or chunk.id, (chunk, score))
+    return list(distinct.values())[:top_k]
 
 
 @app.function
@@ -221,21 +224,21 @@ def render_results(results: Sequence[tuple[Chunk, float]]) -> str:
 
     >>> chunk = Chunk(id="a", title="<A>", text="x & y", source="a.md", embedding=[1.0])
     >>> render_results([(chunk, 0.5)])
-    '<ol><li><strong>&lt;A&gt;</strong><br><small>Ranking score 0.500</small><p>x &amp; y</p></li></ol>'
+    '<ol><li><strong>&lt;A&gt;</strong><br><small>Ähnlichkeitswert 0.500</small><p>x &amp; y</p></li></ol>'
     >>> render_results([])
-    '<p>No passage found.</p>'
+    '<p>Keine Textstelle gefunden.</p>'
     """
     if not results:
-        return "<p>No passage found.</p>"
+        return "<p>Keine Textstelle gefunden.</p>"
     items: list[str] = []
     for chunk, value in results:
         link = ""
         if chunk.url is not None:
             href = html.escape(chunk.url, quote=True)
-            link = f' · <a href="{href}" target="_blank" rel="noopener noreferrer">Source</a>'
+            link = f' · <a href="{href}" target="_blank" rel="noopener noreferrer">Originalkapitel öffnen</a>'
         items.append(
             f"<li><strong>{html.escape(chunk.title)}</strong>"
-            f"<br><small>Ranking score {value:.3f}{link}</small>"
+            f"<br><small>Ähnlichkeitswert {value:.3f}{link}</small>"
             f"<p>{html.escape(chunk.text)}</p></li>"
         )
     return f"<ol>{''.join(items)}</ol>"
@@ -244,12 +247,20 @@ def render_results(results: Sequence[tuple[Chunk, float]]) -> str:
 @app.cell
 def _():
     mo.md("""
-    # Moritz says
+    # Frag mich was
 
-    Search the publications of Moritz Mähr by meaning. Write a question or a topic in German or English.
+    **Fragen stellen. Geschichte finden.**
 
-    The search runs in your browser. The first search downloads a language model of about 120 MB.
-    Your query stays on your device. The score is a ranking score, not a probability.
+    Entdecke Kapitel aus Stadt.Geschichte.Basel mit einer Frage.
+    Die Suche läuft lokal im Browser. Deine Frage bleibt auf deinem Gerät.
+    Die erste Suche lädt ein Sprachmodell von etwa 120 MB herunter.
+    Der Ähnlichkeitswert zeigt die Reihenfolge, keine Wahrscheinlichkeit.
+
+    [Publikationskatalog](https://emono.unibas.ch/stadtgeschichtebasel/catalog)
+
+    Inhalte: CC BY-NC 4.0, © Stadt.Geschichte.Basel / Christoph Merian Verlag.
+    [Lizenz](https://creativecommons.org/licenses/by-nc/4.0/) ·
+    [Quellcode (AGPL-3.0)](https://github.com/Stadt-Geschichte-Basel/frag-mich-was)
     """)
     return
 
@@ -259,7 +270,7 @@ async def _():
     index: SearchIndex | None = None
     index_error = ""
     try:
-        with mo.status.spinner(title="Loading the search index"):
+        with mo.status.spinner(title="Suchindex wird geladen"):
             _base = mo.notebook_location()
             if _base is None:
                 raise ValueError("The notebook location is unknown.")
@@ -284,17 +295,18 @@ def _(index, index_error):
     if index is None:
         _status = mo.callout(
             mo.Html(
-                "<strong>The search is not available.</strong> The search index did not load. "
-                + html.escape(index_error)
+                "<strong>Die Suche ist nicht verfügbar.</strong> Der Suchindex konnte nicht geladen werden. "
             ),
             kind="danger",
         )
     elif not index.chunks:
-        _status = mo.callout(mo.Html("The search index holds no passage."), kind="warn")
+        _status = mo.callout(mo.Html("Der Suchindex enthält keine Textstellen."), kind="warn")
     else:
         _works = len({chunk.source for chunk in index.chunks})
         _status = mo.callout(
-            mo.Html(f"Ready. The index holds {len(index.chunks)} passages from {_works} works."),
+            mo.Html(
+                f"Bereit. Der Index enthält {len(index.chunks)} Textstellen aus {_works} Kapiteln."
+            ),
             kind="success",
         )
     _status
@@ -305,11 +317,11 @@ def _(index, index_error):
 def _(index):
     mo.stop(index is None or not index.chunks)
     form = mo.ui.text(
-        label="Query",
-        placeholder="Wie veränderte der Computer die Verwaltung?",
+        label="Frage",
+        placeholder="Welche Rolle spielte die Rheinfischerei für Basel?",
         full_width=True,
-    ).form(submit_button_label="Search", bordered=False)
-    retry = mo.ui.run_button(label="Retry")
+    ).form(submit_button_label="Suchen", bordered=False)
+    retry = mo.ui.run_button(label="Erneut versuchen")
     form
     return form, retry
 
@@ -325,13 +337,12 @@ def _():
 async def _(form, index, retry, session):
     retry.value  # A click on Retry runs this cell again.
     _query = (form.value or "").strip()
-    mo.stop(not _query, mo.md("Write a query. Then select **Search**."))
+    mo.stop(not _query, mo.md("Stelle eine Frage. Wähle dann **Suchen**."))
     mo.stop(
         not IS_WASM,
         mo.callout(
             mo.md(
-                "The query model runs only in the WebAssembly export. "
-                "Run `marimo export html-wasm app.py -o dist --mode run` and serve `dist/`."
+                "Die Suche benötigt die WebAssembly-Version. Öffne die veröffentlichte Webseite."
             ),
             kind="warn",
         ),
@@ -339,8 +350,8 @@ async def _(form, index, retry, session):
     try:
         if "embed" not in session:
             with mo.status.spinner(
-                title="Loading the language model",
-                subtitle="The first search downloads about 120 MB.",
+                title="Sprachmodell wird geladen",
+                subtitle="Die erste Suche lädt etwa 120 MB herunter.",
             ):
                 from pyodide.code import run_js  # ty: ignore[import-not-found]
 
@@ -350,7 +361,7 @@ async def _(form, index, retry, session):
                     index.model.query_revision,
                     QUERY_DTYPE,
                 )
-        with mo.status.spinner(title="Searching"):
+        with mo.status.spinner(title="Suche läuft"):
             _vector = (await session["embed"](index.model.query_prefix + _query)).to_py()
             check_vector(_vector, index.model.dimensions)
             _output = mo.Html(render_results(rank(_vector, index.chunks)))
@@ -359,9 +370,8 @@ async def _(form, index, retry, session):
             [
                 mo.callout(
                     mo.Html(
-                        "<strong>The search failed.</strong> "
-                        "The language model did not load or did not run. "
-                        + html.escape(str(_exc) or type(_exc).__name__)
+                        "<strong>Die Suche ist fehlgeschlagen.</strong> "
+                        "Das Sprachmodell konnte nicht geladen oder ausgeführt werden. "
                     ),
                     kind="danger",
                 ),

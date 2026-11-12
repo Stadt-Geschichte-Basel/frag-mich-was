@@ -1,6 +1,6 @@
-# Moritz says
+# Frag mich was
 
-Moritz says is a static semantic search page for the publications of Moritz Mähr.
+Frag mich was is a static semantic search page for the chapters of Stadt.Geschichte.Basel.
 The page finds passages by meaning, in German and in English.
 GitHub Pages is the only host. There is no application server.
 
@@ -20,7 +20,7 @@ Do not add confidential or access-restricted text.
 4. `app.py` is a marimo notebook. marimo exports it as a WebAssembly page.
 5. The page loads the index and validates it.
 6. A pinned ONNX model calculates the query embedding in the browser.
-7. Python ranks the passages by dot product and shows the best five.
+7. Python ranks the passages by dot product. It shows the best passage from each of five distinct chapter DOIs.
 
 The query does not leave the browser. No inference service gets the query or a text.
 
@@ -47,28 +47,22 @@ uv sync --locked
 
 ## Change the corpus
 
-1. Put a Markdown or plain-text file in `content/`.
-2. Start the file with front matter that has a `title` and, optionally, a `url`.
-3. Build the index:
+Import the local HTML checkout:
 
-   ```bash
-   uv run --group index python -m scripts.build_index
-   ```
-
-4. Run the gate.
-5. Commit the text, `public/embeddings.json`, and `tests/fixtures/reference_vectors.json` together.
-
-Do not edit `public/embeddings.json` by hand.
-A `url` must be a relative link or an `https://doi.org/` link. `APPROVED_URL_HOSTS` in `app.py` holds the approved hosts.
-
-Front matter example:
-
-```markdown
----
-title: "The title of the work"
-url: "https://doi.org/10.5281/zenodo.11124720"
----
+```bash
+uv run python scripts/import_sgb.py ../sgb-minimal-html
+uv run --group index python -m scripts.build_index
 ```
+
+The importer discovers chapter files in `html/volume-*/sgb-*.html`.
+It includes introductions and appendices with chapter DOIs.
+It keeps text within `<main>` and removes footnote markers and separate endnotes.
+Chapter and volume titles share the index title field.
+Authors remain in Markdown front matter.
+
+Run the gate after the build.
+Commit the content, generated index, and generated reference fixture together.
+Do not edit the generated JSON files by hand.
 
 ## Gate
 
@@ -109,4 +103,5 @@ In the repository settings, set the Pages source to **GitHub Actions**.
 ## Licence
 
 The code has the licence AGPL-3.0-only. Refer to `LICENSE`.
-Each text in `content/` keeps the licence of its publication.
+Publication content: CC BY-NC 4.0, © Stadt.Geschichte.Basel / Christoph Merian Verlag.
+Refer to the [content license](https://creativecommons.org/licenses/by-nc/4.0/).

@@ -48,8 +48,8 @@ FIXTURE_SENTENCES = (
 )
 
 # A query in other words than the passage that it must find within the top three results.
-REFERENCE_QUERY = "extract text from many PDF documents on the command line"
-REFERENCE_EXPECTED_ID = "proghist-batches-pdf:0021"
+REFERENCE_QUERY = "Welche Rolle spielte die Rheinfischerei für Basel?"
+REFERENCE_EXPECTED_URL = "https://doi.org/10.21255/sgb-09.03-874521"
 
 SENTENCE_END = re.compile(r"(?<=[.!?…])\s+(?=[A-ZÄÖÜ\"„«“(\[])")
 
@@ -254,7 +254,7 @@ def main() -> None:  # pragma: no cover - needs the embedding model; tests read 
         ],
         "reference": {
             "query": REFERENCE_QUERY,
-            "expected_id": REFERENCE_EXPECTED_ID,
+            "expected_url": REFERENCE_EXPECTED_URL,
             "embedding": embed([MODEL.query_prefix + REFERENCE_QUERY])[0],
         },
     }

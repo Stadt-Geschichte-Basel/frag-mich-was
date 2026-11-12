@@ -1,6 +1,7 @@
 """Unit tests for index validation, ranking, rendering, and offline indexing."""
 
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -232,14 +233,14 @@ def test_render_results_escapes_values() -> None:
 def test_render_results_links_only_when_url_is_set() -> None:
     plain = render_results([(Chunk(**chunk_data()), 0.25)])
     assert "<a " not in plain
-    assert "Ranking score 0.250" in plain
+    assert "Ähnlichkeitswert 0.250" in plain
     linked = render_results([(Chunk(**chunk_data(url='p.html?a=1&b="2"')), 0.25)])
     assert 'href="p.html?a=1&amp;b=&quot;2&quot;"' in linked
     assert 'rel="noopener noreferrer"' in linked
 
 
 def test_render_results_without_results() -> None:
-    assert render_results([]) == "<p>No passage found.</p>"
+    assert render_results([]) == "<p>Keine Textstelle gefunden.</p>"
 
 
 # Offline indexing: parse_document
@@ -429,3 +430,46 @@ def test_clean_markdown_keeps_only_the_number_of_a_footnote_mark() -> None:
 
 def test_clean_markdown_removes_markdown_escapes() -> None:
     assert clean_markdown(r"ILO-SR\_N1\_engl.pdf and 1\. item") == "ILO-SR_N1_engl.pdf and 1. item"
+
+
+def test_sgb_import(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    from scripts import import_sgb
+
+    monkeypatch.setattr(import_sgb, "ROOT", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["import_sgb.py", str(tmp_path)])
+    with pytest.raises(ValueError, match="No chapter"):
+        import_sgb.main()
+    source = tmp_path / "html" / "volume-01"
+    source.mkdir(parents=True)
+    chapter = source / "sgb-01.html"
+    metadata = "".join(
+        f'<meta name="{key}" content="{value}">'
+        for key, value in {
+            "citation_doi": "10.21255/example",
+            "citation_title": "Kapitel",
+            "citation_inbook_title": "Band",
+            "citation_author": "Autor",
+        }.items()
+    )
+    chapter.write_text(
+        metadata
+        + '<main><h2>Titel</h2><p>Wort<sup id="ref-fn1"><a href="#fn1">1</a></sup>.</p><aside>Text</aside><section role="doc-endnotes">Note</section></main>'
+    )
+    import_sgb.main()
+    output = tmp_path / "content" / "sgb-01.md"
+    first = output.read_text()
+    import_sgb.main()
+    assert first == output.read_text()
+    assert "Wort." in first and "Note" not in first and "## Titel" in first
+    assert parse_document(output.name, first).url == "https://doi.org/10.21255/example"
+    chapter.write_text(metadata + "<main></main>")
+    with pytest.raises(ValueError, match="empty main"):
+        import_sgb.convert(chapter)
+    chunks = [
+        Chunk(**chunk_data(id=str(n), url=f"https://doi.org/10.1/{n // 2}")) for n in range(12)
+    ]
+    assert len(rank([0.6, 0.8], chunks)) == 5
+    assert len({chunk.url for chunk, _ in rank([0.6, 0.8], chunks)}) == 5
+    assert [chunk.id for chunk, _ in rank([0.6, 0.8], chunks)] == ["0", "10", "2", "4", "6"]
