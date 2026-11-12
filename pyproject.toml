@@ -1,0 +1,56 @@
+[project]
+name = "moritz-says"
+version = "0.1.0"
+description = "Static semantic search over the publications of Moritz Mähr, with marimo WASM on GitHub Pages."
+readme = "README.md"
+license = "AGPL-3.0-only"
+requires-python = ">=3.12"
+dependencies = [
+    "marimo==0.25.2",
+    "pydantic==2.14.3",
+]
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = [
+    "playwright==1.65.0",
+    "pytest==9.2.0",
+    "pytest-cov==7.1.0",
+    "ruff==0.17.4",
+    "ty==0.0.101",
+]
+index = [
+    # transformers treats a loaded marimo as a notebook. It then imports IPython.
+    "ipython==9.18.1",
+    "sentence-transformers==6.3.0",
+]
+
+[tool.ruff]
+line-length = 100
+# ruff also formats code blocks in Markdown. The corpus texts must stay as they are.
+extend-exclude = ["content"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+# The formatter sets the line length. Docstring examples and prose stay unwrapped.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# A marimo cell shows its last expression.
+"app.py" = ["B018"]
+
+[tool.pytest.ini_options]
+addopts = "--doctest-modules --cov --cov-fail-under=100 -m 'not browser'"
+testpaths = ["app.py", "scripts", "tests"]
+pythonpath = ["."]
+markers = ["browser: needs the exported site in dist/, Playwright browsers, and network access"]
+
+[tool.coverage.run]
+source = ["app", "scripts"]
+
+[tool.coverage.report]
+show_missing = true
+# A marimo cell runs only in the notebook runtime. The browser test covers the cells.
+exclude_also = ["@app\\.cell", "if __name__ == .__main__.:"]
