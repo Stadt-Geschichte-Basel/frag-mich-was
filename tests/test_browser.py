@@ -86,9 +86,13 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
     errors: list[str] = []
     page = open_page(context, hosts, errors)
     page.goto(site)
-    page.get_by_text("Bereit. Der Index enthält").wait_for(timeout=LOAD_TIMEOUT)
+    page.get_by_text(
+        f"Du kannst {len({chunk.url for chunk in INDEX.chunks})} Kapitel durchsuchen."
+    ).wait_for(timeout=LOAD_TIMEOUT)
     page.reload()
-    page.get_by_text("Bereit. Der Index enthält").wait_for(timeout=LOAD_TIMEOUT)
+    page.get_by_text(
+        f"Du kannst {len({chunk.url for chunk in INDEX.chunks})} Kapitel durchsuchen."
+    ).wait_for(timeout=LOAD_TIMEOUT)
 
     logo = page.get_by_role("img", name="Stadt.Geschichte.Basel")
     assert logo.evaluate("image => image.complete && image.naturalWidth > 0")
@@ -118,7 +122,7 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
     )
 
     search(page, "   ")
-    page.get_by_text("Stelle eine Frage.").wait_for(timeout=LOAD_TIMEOUT)
+    page.get_by_text("Gib eine Frage oder ein Thema ein.").wait_for(timeout=LOAD_TIMEOUT)
     assert not any(host.endswith(ALLOWED_HOST_SUFFIXES) for host in hosts), "blank query"
 
     reference = FIXTURE["reference"]
@@ -127,6 +131,8 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
     items.first.wait_for(timeout=MODEL_TIMEOUT)
     texts = [" ".join(text.split()) for text in items.all_inner_texts()]
     assert 1 <= len(texts) <= 5
+    assert all("Ähnlichkeitswert" not in text for text in texts)
+    assert page.get_by_text("Die Suche zeigt passende Textstellen,", exact=False).is_visible()
     expected = next(chunk for chunk in INDEX.chunks if chunk.url == reference["expected_url"])
     assert expected.url in items.locator("a").evaluate_all(
         "links => links.slice(0, 3).map(link => link.href)"
@@ -151,7 +157,13 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
     logo.scroll_into_view_if_needed()
     page.screenshot(path=str(tmp_path / "mobile.png"), full_page=True)
     items.first.screenshot(path=str(tmp_path / "mobile-result.png"))
-    print(f"Brand previews: {tmp_path}")
+    about = page.locator("details").filter(has=page.locator("summary", has_text="Über die Suche"))
+    assert about.get_attribute("open") is None
+    about.locator("summary").click()
+    assert about.get_by_text("Deine Frage wird lokal", exact=False).is_visible()
+    assert about.get_by_role("link", name="Publikationskatalog").is_visible()
+    assert about.get_by_role("link", name="CC BY-NC 4.0").is_visible()
+    print(f"Interface previews: {tmp_path}")
     assert not errors
     assert all(is_allowed(host) for host in hosts), sorted(hosts)
     page.close()
@@ -195,7 +207,7 @@ def test_browser_vectors_match_python(context: BrowserContext, site: str) -> Non
         (
             200,
             json.dumps({"schema_version": 1, "model": FIXTURE["model"], "chunks": []}),
-            "Der Suchindex enthält keine Textstellen.",
+            "Zurzeit sind keine Kapitel verfügbar. Versuche es später nochmals.",
         ),
     ],
 )
@@ -225,7 +237,9 @@ def test_model_failure_shows_retry(context: BrowserContext, site: str) -> None:
 
     page.route("https://huggingface.co/**", block)
     page.goto(site)
-    page.get_by_text("Bereit. Der Index enthält").wait_for(timeout=LOAD_TIMEOUT)
+    page.get_by_text(
+        f"Du kannst {len({chunk.url for chunk in INDEX.chunks})} Kapitel durchsuchen."
+    ).wait_for(timeout=LOAD_TIMEOUT)
     search(page, FIXTURE["reference"]["query"])
     page.get_by_text("Die Suche ist fehlgeschlagen.").wait_for(timeout=MODEL_TIMEOUT)
     assert page.locator("ol li").count() == 0

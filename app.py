@@ -226,24 +226,28 @@ def render_results(results: Sequence[tuple[Chunk, float]]) -> str:
 
     >>> chunk = Chunk(id="a", title="<A>", text="x & y", source="a.md", embedding=[1.0])
     >>> render_results([(chunk, 0.5)])
-    '<ol class="sgb-results"><li><strong>&lt;A&gt;</strong><br><small>Ähnlichkeitswert 0.500</small><p>x &amp; y</p></li></ol>'
+    '<p>Die Suche zeigt passende Textstellen, keine automatisch generierten Antworten. Der Link führt zum Originalkapitel.</p><ol class="sgb-results"><li><strong>&lt;A&gt;</strong><p>x &amp; y</p></li></ol>'
     >>> render_results([])
     '<p>Keine Textstelle gefunden.</p>'
     """
     if not results:
         return "<p>Keine Textstelle gefunden.</p>"
     items: list[str] = []
-    for chunk, value in results:
+    for chunk, _score in results:
         link = ""
         if chunk.url is not None:
             href = html.escape(chunk.url, quote=True)
-            link = f' · <a href="{href}" target="_blank" rel="noopener noreferrer">Originalkapitel öffnen</a>'
+            link = f'<br><small><a href="{href}" target="_blank" rel="noopener noreferrer">Originalkapitel öffnen</a></small>'
         items.append(
             f"<li><strong>{html.escape(chunk.title)}</strong>"
-            f"<br><small>Ähnlichkeitswert {value:.3f}{link}</small>"
+            f"{link}"
             f"<p>{html.escape(chunk.text)}</p></li>"
         )
-    return f'<ol class="sgb-results">{"".join(items)}</ol>'
+    return (
+        "<p>Die Suche zeigt passende Textstellen, keine automatisch generierten Antworten. "
+        "Der Link führt zum Originalkapitel.</p>"
+        f'<ol class="sgb-results">{"".join(items)}</ol>'
+    )
 
 
 @app.cell
@@ -257,16 +261,8 @@ def _():
 
     **Fragen stellen. Geschichte finden.**
 
-    Entdecke Kapitel aus Stadt.Geschichte.Basel mit einer Frage.
-    Die Suche läuft lokal im Browser. Deine Frage bleibt auf deinem Gerät.
-    Die erste Suche lädt ein Sprachmodell von etwa 120 MB herunter.
-    Der Ähnlichkeitswert zeigt die Reihenfolge, keine Wahrscheinlichkeit.
-
-    [Publikationskatalog](https://emono.unibas.ch/stadtgeschichtebasel/catalog)
-
-    Inhalte: CC BY-NC 4.0, © Stadt.Geschichte.Basel / Christoph Merian Verlag.
-    [Lizenz](https://creativecommons.org/licenses/by-nc/4.0/) ·
-    [Quellcode (AGPL-3.0)](https://github.com/Stadt-Geschichte-Basel/frag-mich-was)
+    Finde Textstellen in den Kapiteln von Stadt.Geschichte.Basel.
+    Stelle eine Frage oder gib ein Thema ein.
     """)
     return
 
@@ -276,7 +272,7 @@ async def _():
     index: SearchIndex | None = None
     index_error = ""
     try:
-        with mo.status.spinner(title="Suchindex wird geladen"):
+        with mo.status.spinner(title="Die Suche wird vorbereitet"):
             _base = mo.notebook_location()
             if _base is None:
                 raise ValueError("The notebook location is unknown.")
@@ -301,18 +297,20 @@ def _(index, index_error):
     if index is None:
         _status = mo.callout(
             mo.Html(
-                "<strong>Die Suche ist nicht verfügbar.</strong> Der Suchindex konnte nicht geladen werden. "
+                "<strong>Die Suche ist nicht verfügbar.</strong> "
+                "Lade die Seite neu. Wenn das nicht hilft, versuche es später nochmals."
             ),
             kind="danger",
         )
     elif not index.chunks:
-        _status = mo.callout(mo.Html("Der Suchindex enthält keine Textstellen."), kind="warn")
-    else:
-        _works = len({chunk.source for chunk in index.chunks})
         _status = mo.callout(
-            mo.Html(
-                f"Bereit. Der Index enthält {len(index.chunks)} Textstellen aus {_works} Kapiteln."
-            ),
+            mo.Html("Zurzeit sind keine Kapitel verfügbar. Versuche es später nochmals."),
+            kind="warn",
+        )
+    else:
+        _works = len({chunk.url or chunk.source for chunk in index.chunks})
+        _status = mo.callout(
+            mo.Html(f"Du kannst {_works} Kapitel durchsuchen."),
             kind="success",
         )
     _status
@@ -323,12 +321,17 @@ def _(index, index_error):
 def _(index):
     mo.stop(index is None or not index.chunks)
     form = mo.ui.text(
-        label="Frage",
-        placeholder="Welche Rolle spielte die Rheinfischerei für Basel?",
+        label="Was möchtest du über Basels Geschichte wissen?",
+        placeholder="Welche Bedeutung hatte der Rhein für Basel?",
         full_width=True,
     ).form(submit_button_label="Suchen", bordered=False)
     retry = mo.ui.run_button(label="Erneut versuchen")
-    form
+    mo.vstack(
+        [
+            form,
+            mo.md("Auch verwandte Begriffe können passende Textstellen finden."),
+        ]
+    )
     return form, retry
 
 
@@ -343,7 +346,7 @@ def _():
 async def _(form, index, retry, session):
     retry.value  # A click on Retry runs this cell again.
     _query = (form.value or "").strip()
-    mo.stop(not _query, mo.md("Stelle eine Frage. Wähle dann **Suchen**."))
+    mo.stop(not _query, mo.md("Gib eine Frage oder ein Thema ein. Wähle dann **Suchen**."))
     mo.stop(
         not IS_WASM,
         mo.callout(
@@ -356,8 +359,8 @@ async def _(form, index, retry, session):
     try:
         if "embed" not in session:
             with mo.status.spinner(
-                title="Sprachmodell wird geladen",
-                subtitle="Die erste Suche lädt etwa 120 MB herunter.",
+                title="Die erste Suche wird vorbereitet",
+                subtitle="Dafür laden wir etwa 120 MB herunter. Das kann einen Moment dauern.",
             ):
                 from pyodide.code import run_js  # ty: ignore[import-not-found]
 
@@ -377,7 +380,7 @@ async def _(form, index, retry, session):
                 mo.callout(
                     mo.Html(
                         "<strong>Die Suche ist fehlgeschlagen.</strong> "
-                        "Das Sprachmodell konnte nicht geladen oder ausgeführt werden. "
+                        "Prüfe deine Internetverbindung und wähle «Erneut versuchen»."
                     ),
                     kind="danger",
                 ),
@@ -385,6 +388,33 @@ async def _(form, index, retry, session):
             ]
         )
     _output
+    return
+
+
+@app.cell
+def _():
+    mo.Html("""
+    <details>
+    <summary>Über die Suche</summary>
+    <p>Frag mich was ist ein Suchangebot des Projekts Stadt.Geschichte.Basel.
+    Es erschliesst die Kapitel der Buchreihe von Stadt.Geschichte.Basel / Christoph Merian Verlag,
+    einschliesslich Einleitungen und Anhängen.</p>
+    <p>Die semantische Suche vergleicht die Bedeutung deiner Frage mit den Textstellen.
+    Die Reihenfolge beruht auf sprachlicher Ähnlichkeit. Die Suche kann wichtige Stellen übersehen
+    oder unpassende Stellen anzeigen. Die Textstellen sind keine geprüften Antworten auf deine Frage.
+    Prüfe die Aussage und ihren Zusammenhang im Originalkapitel.</p>
+    <p>Deine Frage wird lokal in deinem Browser verarbeitet und bleibt auf deinem Gerät.
+    Beim ersten Besuch braucht die Seite eine Internetverbindung.
+    Die erste Suche lädt ein Sprachmodell von etwa 120 MB herunter.
+    Die Links «Originalkapitel öffnen» führen über die DOI zur jeweiligen Publikation.</p>
+    <p>Alle Originalpublikationen findest du im
+    <a href="https://emono.unibas.ch/stadtgeschichtebasel/catalog">Publikationskatalog</a>.</p>
+    <p>Inhalte: © Stadt.Geschichte.Basel / Christoph Merian Verlag,
+    <a href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</a>.
+    Den <a href="https://github.com/Stadt-Geschichte-Basel/frag-mich-was">Quellcode</a>
+    findest du auf GitHub. Die Software steht unter AGPL-3.0.</p>
+    </details>
+    """)
     return
 
 

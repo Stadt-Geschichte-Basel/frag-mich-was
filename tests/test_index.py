@@ -233,7 +233,8 @@ def test_render_results_escapes_values() -> None:
 def test_render_results_links_only_when_url_is_set() -> None:
     plain = render_results([(Chunk(**chunk_data()), 0.25)])
     assert "<a " not in plain
-    assert "Ähnlichkeitswert 0.250" in plain
+    assert "Ähnlichkeitswert" not in plain
+    assert "0.250" not in plain
     linked = render_results([(Chunk(**chunk_data(url='p.html?a=1&b="2"')), 0.25)])
     assert 'href="p.html?a=1&amp;b=&quot;2&quot;"' in linked
     assert 'rel="noopener noreferrer"' in linked
