@@ -1,0 +1,156 @@
+/* SGB tokens and typography, adapted from sgb-theme. Asset URLs are site-relative. */
+@font-face {
+  font-family: "Euclid Circular B";
+  src: url("public/sgb/assets/fonts/EuclidCircularB-Regular-WebS.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Euclid Circular B";
+  src: url("public/sgb/assets/fonts/EuclidCircularB-Medium-WebS.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Euclid Circular B";
+  src: url("public/sgb/assets/fonts/EuclidCircularB-Semibold-WebS.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+}
+:root, .marimo {
+  --sgb-purple: #3a1e3e;
+  --sgb-yellow: #ffe880;
+  --sgb-blue: #2761e3;
+  --sgb-text: #181818;
+  --marimo-text-font: "Euclid Circular B", Arial, sans-serif;
+  --marimo-heading-font: "Euclid Circular B", Arial, sans-serif;
+  --background: #fff;
+  --foreground: var(--sgb-text);
+  --card: #fff;
+  --card-foreground: var(--sgb-text);
+  --primary: var(--sgb-purple);
+  --primary-foreground: #fff;
+  --ring: var(--sgb-purple);
+  color-scheme: light;
+}
+body {
+  background: #fff;
+  color: var(--sgb-text);
+  font-family: var(--marimo-text-font);
+}
+.sgb-brand {
+  background: var(--sgb-purple);
+  border-radius: 0.2rem;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+.sgb-brand img {
+  display: block;
+  width: 180px;
+  height: auto;
+  max-width: 100%;
+}
+h1, .markdown h1, .mo-markdown-renderer h1 {
+  color: var(--sgb-purple);
+  font-weight: 600;
+  line-height: 1.2;
+  text-decoration: underline;
+  text-decoration-color: var(--sgb-yellow);
+  text-decoration-thickness: 4px;
+  text-underline-offset: 0.2em;
+}
+.markdown a, .sgb-results a, .sgb-about a {
+  color: var(--sgb-blue);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+.markdown a:hover, .sgb-results a:hover, .sgb-about a:hover {
+  color: var(--sgb-purple);
+  background: var(--sgb-yellow);
+}
+input[type="text"] {
+  border: 1.5px solid var(--sgb-purple);
+  border-radius: 0.2rem;
+  background: #fff;
+  color: var(--sgb-text);
+  font: inherit;
+  min-height: 44px;
+}
+marimo-ui-element button, button[data-testid="marimo-plugin-form-submit-button"] {
+  background: var(--sgb-purple);
+  color: #fff;
+  border: 1.5px solid var(--sgb-purple);
+  border-radius: 0.2rem;
+  font-family: var(--marimo-text-font);
+  font-weight: 600;
+  min-height: 44px;
+  padding-inline: 1.25rem;
+}
+marimo-ui-element button:hover:not(:disabled),
+button[data-testid="marimo-plugin-form-submit-button"]:hover:not(:disabled) {
+  background: var(--sgb-yellow);
+  color: var(--sgb-purple);
+}
+a:focus-visible, input:focus-visible, button:focus-visible, summary:focus-visible {
+  outline: 3px solid var(--sgb-purple);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 6px var(--sgb-yellow);
+}
+.sgb-results {
+  list-style: none;
+  padding: 0;
+  margin: 1.5rem 0;
+  display: grid;
+  gap: 1rem;
+}
+.sgb-results li {
+  border: 1px solid var(--sgb-purple);
+  border-left: 5px solid var(--sgb-yellow);
+  border-radius: 0.2rem;
+  padding: 1.25rem;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.sgb-results h2 {
+  color: var(--sgb-purple);
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+.sgb-results small {
+  display: inline-block;
+  margin-top: 0.5rem;
+}
+.sgb-results p {
+  margin-top: 0.75rem;
+}
+::selection {
+  color: var(--sgb-purple);
+  background: var(--sgb-yellow);
+}
+@media (max-width: 600px) {
+  .sgb-brand { padding: 1rem; }
+  .sgb-brand img { width: 150px; }
+  h1 { font-size: 2rem; }
+  .sgb-results li { padding: 1rem; }
+}
+
+.sgb-results h2 {
+  margin: 0;
+  line-height: 1.5;
+}
+.sgb-results a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+}
+.sgb-about summary {
+  cursor: pointer;
+  min-height: 44px;
+  padding-block: 0.5rem;
+}
+a, button, input, summary {
+  scroll-margin-block: 3rem;
+}

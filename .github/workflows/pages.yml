@@ -38,9 +38,10 @@ jobs:
 
       - name: Export
         run: |
-          uv run marimo export html-wasm app.py -o dist --mode run
+          uv run python -m scripts.export_site
           rm -f dist/CLAUDE.md
           test -s dist/index.html
+          grep -q '<html lang="de-CH">' dist/index.html
           test -s dist/public/embeddings.json
           test -d dist/assets
 
