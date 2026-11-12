@@ -8,7 +8,7 @@ For a security problem, refer to [`SECURITY.md`](SECURITY.md). Do not open a pub
 
 ## Change the code
 
-1. Fork the repository and make a topic branch.
+1. Make a topic branch. Fork the repository if you have no push access.
 2. Install the environment:
 
    ```bash
@@ -25,16 +25,25 @@ For a security problem, refer to [`SECURITY.md`](SECURITY.md). Do not open a pub
    uv run marimo check app.py --select MW
    ```
 
-5. If the change touches `app.py`, run the browser tests. Refer to [`README.md`](README.md).
+5. For browser-facing changes, run the browser tests. Refer to [`README.md`](README.md).
 6. Open a pull request. Use a [Conventional Commit](https://www.conventionalcommits.org/en/v1.0.0/) as the title.
 
 Keep one logical change in each pull request.
 
+`main` requires pull requests, one independent approval, and a passing `build` check.
+Resolve review conversations before merging.
+New commits dismiss stale approvals.
+Keep the branch current with `main`.
+Use a squash merge to preserve linear history.
+The protection also applies to administrators.
+Force pushes and branch deletion are blocked.
+
 ## Corpus
 
-The maintainer selects the texts in `content/`.
-Do not open a pull request that adds or changes a text.
-Report an error in a text as an issue.
+The corpus comes from `Stadt-Geschichte-Basel/sgb-minimal-html`.
+Use the import and index commands in [`README.md`](README.md).
+Keep corpus changes and generated files together in the pull request.
+Report source-text errors to the source repository.
 
 ## Conduct
 

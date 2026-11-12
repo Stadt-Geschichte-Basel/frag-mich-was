@@ -4,7 +4,7 @@
 
 Do not open a public issue for a vulnerability.
 
-Use the private report form: <https://github.com/maehr/moritz-says/security/advisories/new>.
+Use the private report form: <https://github.com/Stadt-Geschichte-Basel/frag-mich-was/security/advisories/new>.
 Describe the problem, the steps to reproduce it, and the effect.
 
 ## Supported version
