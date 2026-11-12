@@ -1,7 +1,9 @@
 import marimo
 
 __generated_with = "0.25.2"
-app = marimo.App(width="medium", app_title="Frag mich was")
+app = marimo.App(
+    width="medium", app_title="Frag mich was", css_file="sgb.css", html_head_file="head.html"
+)
 
 with app.setup:
     import html
@@ -224,7 +226,7 @@ def render_results(results: Sequence[tuple[Chunk, float]]) -> str:
 
     >>> chunk = Chunk(id="a", title="<A>", text="x & y", source="a.md", embedding=[1.0])
     >>> render_results([(chunk, 0.5)])
-    '<ol><li><strong>&lt;A&gt;</strong><br><small>Ähnlichkeitswert 0.500</small><p>x &amp; y</p></li></ol>'
+    '<ol class="sgb-results"><li><strong>&lt;A&gt;</strong><br><small>Ähnlichkeitswert 0.500</small><p>x &amp; y</p></li></ol>'
     >>> render_results([])
     '<p>Keine Textstelle gefunden.</p>'
     """
@@ -241,12 +243,16 @@ def render_results(results: Sequence[tuple[Chunk, float]]) -> str:
             f"<br><small>Ähnlichkeitswert {value:.3f}{link}</small>"
             f"<p>{html.escape(chunk.text)}</p></li>"
         )
-    return f"<ol>{''.join(items)}</ol>"
+    return f'<ol class="sgb-results">{"".join(items)}</ol>'
 
 
 @app.cell
 def _():
     mo.md("""
+    <div class="sgb-brand">
+    <img src="public/sgb/assets/img/logo.svg" alt="Stadt.Geschichte.Basel" width="180" height="79">
+    </div>
+
     # Frag mich was
 
     **Fragen stellen. Geschichte finden.**

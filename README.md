@@ -105,3 +105,11 @@ In the repository settings, set the Pages source to **GitHub Actions**.
 The code has the licence AGPL-3.0-only. Refer to `LICENSE`.
 Publication content: CC BY-NC 4.0, © Stadt.Geschichte.Basel / Christoph Merian Verlag.
 Refer to the [content license](https://creativecommons.org/licenses/by-nc/4.0/).
+
+## Branding
+
+`sgb.css` uses marimo’s custom CSS support.
+`head.html` adds the favicon and theme colour.
+The export copies local branding assets from `public/sgb/`.
+All asset URLs resolve below the repository path.
+Refer to [asset provenance](public/sgb/README.md) for the source revision.

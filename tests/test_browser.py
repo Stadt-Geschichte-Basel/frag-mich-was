@@ -80,7 +80,7 @@ def is_allowed(host: str) -> bool:
     return local or host in ALLOWED_HOSTS or host.endswith(ALLOWED_HOST_SUFFIXES)
 
 
-def test_search_end_to_end(context: BrowserContext, site: str) -> None:
+def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -> None:
     """A1, A2, A3, and the empty query of A6."""
     hosts: set[str] = set()
     errors: list[str] = []
@@ -89,6 +89,33 @@ def test_search_end_to_end(context: BrowserContext, site: str) -> None:
     page.get_by_text("Bereit. Der Index enthält").wait_for(timeout=LOAD_TIMEOUT)
     page.reload()
     page.get_by_text("Bereit. Der Index enthält").wait_for(timeout=LOAD_TIMEOUT)
+
+    logo = page.get_by_role("img", name="Stadt.Geschichte.Basel")
+    assert logo.evaluate("image => image.complete && image.naturalWidth > 0")
+    assert (
+        page.get_by_role("heading", name="Frag mich was").evaluate(
+            "element => getComputedStyle(element).color"
+        )
+        == "rgb(58, 30, 62)"
+    )
+    assert (
+        page.locator(".sgb-brand").evaluate("element => getComputedStyle(element).backgroundColor")
+        == "rgb(58, 30, 62)"
+    )
+    page.evaluate("document.fonts.ready")
+    assert page.evaluate("document.fonts.check('16px \"Euclid Circular B\"')")
+    for asset in [
+        "public/sgb/favicon.png",
+        *[
+            f"public/sgb/assets/fonts/EuclidCircularB-{weight}-WebS.woff2"
+            for weight in ("Regular", "Medium", "Semibold")
+        ],
+    ]:
+        assert page.request.get(site + asset).ok
+    assert (
+        page.locator('link[rel="icon"][type="image/png"]').get_attribute("href")
+        == "public/sgb/favicon.png"
+    )
 
     search(page, "   ")
     page.get_by_text("Stelle eine Frage.").wait_for(timeout=LOAD_TIMEOUT)
@@ -108,6 +135,23 @@ def test_search_end_to_end(context: BrowserContext, site: str) -> None:
     links = items.locator("a").evaluate_all("links => links.map(link => link.href)")
     assert len(set(links)) == len(texts)
     assert all(link.startswith("https://doi.org/") for link in links)
+    page.mouse.move(0, 0)
+    assert (
+        page.get_by_role("button", name="Suchen").evaluate(
+            "element => getComputedStyle(element).backgroundColor"
+        )
+        == "rgb(58, 30, 62)"
+    )
+    page.screenshot(path=str(tmp_path / "desktop.png"), full_page=True)
+    items.first.screenshot(path=str(tmp_path / "desktop-result.png"))
+    page.set_viewport_size({"width": 390, "height": 844})
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    button_box = page.get_by_role("button", name="Suchen").bounding_box()
+    assert button_box is not None and button_box["height"] >= 44
+    logo.scroll_into_view_if_needed()
+    page.screenshot(path=str(tmp_path / "mobile.png"), full_page=True)
+    items.first.screenshot(path=str(tmp_path / "mobile-result.png"))
+    print(f"Brand previews: {tmp_path}")
     assert not errors
     assert all(is_allowed(host) for host in hosts), sorted(hosts)
     page.close()
