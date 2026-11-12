@@ -12,6 +12,24 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+VOID_ELEMENTS = frozenset(
+    {
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "param",
+        "source",
+        "track",
+        "wbr",
+    }
+)
 
 
 class ChapterHTML(HTMLParser):
@@ -50,7 +68,8 @@ class ChapterHTML(HTMLParser):
                 or values.get("role") == "doc-endnotes"
                 or tag in {"script", "style"}
             ):
-                self.skip += 1
+                if tag not in VOID_ELEMENTS:
+                    self.skip += 1
             elif tag in {"p", "aside", "br"}:
                 self.parts.append("\n\n")
             elif tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
@@ -64,6 +83,8 @@ class ChapterHTML(HTMLParser):
         >>> parser.body()
         'A\\n\\nB'
         """
+        if tag in VOID_ELEMENTS:
+            return
         if self.skip:
             self.skip -= 1
         elif self.active and tag in {"p", "aside", "h1", "h2", "h3", "h4", "h5", "h6"}:
@@ -151,6 +172,10 @@ def main() -> None:
     output.mkdir(exist_ok=True)
     for stem, text in chapters:
         (output / f"{stem}.md").write_text(text, encoding="utf-8")
+    expected = {f"{stem}.md" for stem, _text in chapters}
+    for stale in sorted(output.glob("sgb-*.md")):
+        if stale.name not in expected:
+            stale.unlink()
     print(f"Imported {len(chapters)} chapters.")
 
 

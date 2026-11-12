@@ -40,7 +40,7 @@ def test_fixture_vectors_are_valid() -> None:
 
 
 def test_reference_query_finds_the_expected_passage() -> None:
-    """A3: a query in other words finds the passage within the top three."""
+    """A query in other words finds the expected chapter within the top three."""
     reference = FIXTURE["reference"]
     assert (reference["query"], reference["expected_url"]) == (
         REFERENCE_QUERY,
