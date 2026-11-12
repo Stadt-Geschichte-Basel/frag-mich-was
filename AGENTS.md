@@ -2,7 +2,7 @@
 
 This repository is a static semantic search page for the chapters of Stadt.Geschichte.Basel. It is a marimo WebAssembly notebook on GitHub Pages.
 
-It follows the shared Python specification, `10-AGENTS.python.md`. `SPEC.md` is the product specification.
+It follows the shared Python specification, `10-AGENTS.python.md`. `README.md` describes the current application and workflow.
 Sections 1, 3, and 6 name only the tools that this repository uses.
 These parts of the shared specification are not set up: prek, commitizen, git-cliff, CodeQL, dependency review, and `CODEOWNERS`.
 
@@ -32,7 +32,7 @@ Pin versions in `pyproject.toml`. Commit `uv.lock`. Install with `uv sync --lock
 * Require 100% coverage on core logic. Keep each exclusion narrow and explicit.
 * The browser gets only `app.py`. Put browser logic in a top-level function of `app.py`, not in a cell.
 * Never edit `public/embeddings.json` or `tests/fixtures/reference_vectors.json` by hand. Run the index build.
-* Convert a PDF for `content/` with the `pdf2md` MCP server.
+* Import chapter HTML with `scripts/import_sgb.py`. Keep imported `sgb-*.md` files generated.
 
 Run this gate before each commit. CI runs the same gate.
 
@@ -49,7 +49,7 @@ Other commands:
 
 ```bash
 uv run --group index python -m scripts.build_index          # Build the index and the fixture.
-uv run marimo export html-wasm app.py -o dist --mode run    # Export the site.
+uv run python -m scripts.export_site    # Export the site.
 uv run pytest -m browser --no-cov                           # Browser tests. They need dist/ and a network.
 ```
 

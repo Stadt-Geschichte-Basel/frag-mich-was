@@ -226,27 +226,28 @@ def render_results(results: Sequence[tuple[Chunk, float]]) -> str:
 
     >>> chunk = Chunk(id="a", title="<A>", text="x & y", source="a.md", embedding=[1.0])
     >>> render_results([(chunk, 0.5)])
-    '<p>Die Suche zeigt passende Textstellen, keine automatisch generierten Antworten. Der Link führt zum Originalkapitel.</p><ol class="sgb-results"><li><strong>&lt;A&gt;</strong><p>x &amp; y</p></li></ol>'
+    '<p role="status" aria-atomic="true">1 passende Kapitel gefunden.</p><ol class="sgb-results" role="list"><li><h2>&lt;A&gt;</h2><p>x &amp; y</p></li></ol>'
     >>> render_results([])
-    '<p>Keine Textstelle gefunden.</p>'
+    '<p role="status" aria-atomic="true">Keine Textstelle gefunden.</p>'
     """
     if not results:
-        return "<p>Keine Textstelle gefunden.</p>"
+        return '<p role="status" aria-atomic="true">Keine Textstelle gefunden.</p>'
     items: list[str] = []
     for chunk, _score in results:
         link = ""
         if chunk.url is not None:
             href = html.escape(chunk.url, quote=True)
-            link = f'<br><small><a href="{href}" target="_blank" rel="noopener noreferrer">Originalkapitel öffnen</a></small>'
+            link = (
+                f'<small><a href="{href}" target="_blank" rel="noopener noreferrer" '
+                f'aria-label="Originalkapitel öffnen: {html.escape(chunk.title, quote=True)}">'
+                "Originalkapitel öffnen</a></small>"
+            )
         items.append(
-            f"<li><strong>{html.escape(chunk.title)}</strong>"
-            f"{link}"
-            f"<p>{html.escape(chunk.text)}</p></li>"
+            f"<li><h2>{html.escape(chunk.title)}</h2>{link}<p>{html.escape(chunk.text)}</p></li>"
         )
     return (
-        "<p>Die Suche zeigt passende Textstellen, keine automatisch generierten Antworten. "
-        "Der Link führt zum Originalkapitel.</p>"
-        f'<ol class="sgb-results">{"".join(items)}</ol>'
+        f'<p role="status" aria-atomic="true">{len(results)} passende Kapitel gefunden.</p>'
+        f'<ol class="sgb-results" role="list">{"".join(items)}</ol>'
     )
 
 
@@ -272,23 +273,24 @@ async def _():
     index: SearchIndex | None = None
     index_error = ""
     try:
-        with mo.status.spinner(title="Die Suche wird vorbereitet"):
-            _base = mo.notebook_location()
-            if _base is None:
-                raise ValueError("The notebook location is unknown.")
-            _location = _base.joinpath(*INDEX_PATH)
-            if IS_WASM:
-                from pyodide.http import pyfetch  # ty: ignore[import-not-found]
+        mo.output.replace(mo.Html('<p role="status">Die Suche wird vorbereitet.</p>'))
+        _base = mo.notebook_location()
+        if _base is None:
+            raise ValueError("The notebook location is unknown.")
+        _location = _base.joinpath(*INDEX_PATH)
+        if IS_WASM:
+            from pyodide.http import pyfetch  # ty: ignore[import-not-found]
 
-                _response = await pyfetch(str(_location))
-                if not _response.ok:
-                    raise ValueError(f"The server answered with status {_response.status}.")
-                _raw = await _response.string()
-            else:
-                _raw = Path(str(_location)).read_text(encoding="utf-8")
-            index = load_index(_raw)
+            _response = await pyfetch(str(_location))
+            if not _response.ok:
+                raise ValueError(f"The server answered with status {_response.status}.")
+            _raw = await _response.string()
+        else:
+            _raw = Path(str(_location)).read_text(encoding="utf-8")
+        index = load_index(_raw)
     except Exception as _exc:
         index_error = str(_exc) or type(_exc).__name__
+    mo.output.clear()
     return index, index_error
 
 
@@ -297,20 +299,22 @@ def _(index, index_error):
     if index is None:
         _status = mo.callout(
             mo.Html(
-                "<strong>Die Suche ist nicht verfügbar.</strong> "
-                "Lade die Seite neu. Wenn das nicht hilft, versuche es später nochmals."
+                '<div role="alert"><strong>Die Suche ist nicht verfügbar.</strong> '
+                "Lade die Seite neu. Wenn das nicht hilft, versuche es später nochmals.</div>"
             ),
             kind="danger",
         )
     elif not index.chunks:
         _status = mo.callout(
-            mo.Html("Zurzeit sind keine Kapitel verfügbar. Versuche es später nochmals."),
+            mo.Html(
+                '<p role="status">Zurzeit sind keine Kapitel verfügbar. Versuche es später nochmals.</p>'
+            ),
             kind="warn",
         )
     else:
         _works = len({chunk.url or chunk.source for chunk in index.chunks})
         _status = mo.callout(
-            mo.Html(f"Du kannst {_works} Kapitel durchsuchen."),
+            mo.Html(f'<p role="status">Du kannst {_works} Kapitel durchsuchen.</p>'),
             kind="success",
         )
     _status
@@ -358,43 +362,53 @@ async def _(form, index, retry, session):
     )
     try:
         if "embed" not in session:
-            with mo.status.spinner(
-                title="Die erste Suche wird vorbereitet",
-                subtitle="Dafür laden wir etwa 120 MB herunter. Das kann einen Moment dauern.",
-            ):
-                from pyodide.code import run_js  # ty: ignore[import-not-found]
-
-                session["embed"] = await run_js(EMBEDDER_JS)(
-                    TRANSFORMERS_JS_URL,
-                    index.model.query_model,
-                    index.model.query_revision,
-                    QUERY_DTYPE,
+            mo.output.replace(
+                mo.Html(
+                    '<p role="status">Die erste Suche wird vorbereitet. '
+                    "Dafür laden wir etwa 120 MB herunter. Das kann einen Moment dauern.</p>"
                 )
-        with mo.status.spinner(title="Suche läuft"):
-            _vector = (await session["embed"](index.model.query_prefix + _query)).to_py()
-            check_vector(_vector, index.model.dimensions)
-            _output = mo.Html(render_results(rank(_vector, index.chunks)))
+            )
+            from pyodide.code import run_js  # ty: ignore[import-not-found]
+
+            session["embed"] = await run_js(EMBEDDER_JS)(
+                TRANSFORMERS_JS_URL,
+                index.model.query_model,
+                index.model.query_revision,
+                QUERY_DTYPE,
+            )
+        mo.output.replace(mo.Html('<p role="status">Suche läuft.</p>'))
+        _vector = (await session["embed"](index.model.query_prefix + _query)).to_py()
+        check_vector(_vector, index.model.dimensions)
+        _output = mo.vstack(
+            [
+                mo.md(
+                    "Die Suche zeigt passende Textstellen, keine automatisch generierten Antworten. "
+                    "Der Link führt zum Originalkapitel."
+                ),
+                mo.Html(render_results(rank(_vector, index.chunks))),
+            ]
+        )
     except Exception as _exc:
         _output = mo.vstack(
             [
                 mo.callout(
                     mo.Html(
-                        "<strong>Die Suche ist fehlgeschlagen.</strong> "
-                        "Prüfe deine Internetverbindung und wähle «Erneut versuchen»."
+                        '<div role="alert"><strong>Die Suche ist fehlgeschlagen.</strong> '
+                        "Prüfe deine Internetverbindung und wähle «Erneut versuchen».</div>"
                     ),
                     kind="danger",
                 ),
                 retry,
             ]
         )
-    _output
+    mo.output.replace(_output)
     return
 
 
 @app.cell
 def _():
     mo.Html("""
-    <details>
+    <details class="sgb-about">
     <summary>Über die Suche</summary>
     <p>Frag mich was ist ein Suchangebot des Projekts Stadt.Geschichte.Basel.
     Es erschliesst die Kapitel der Buchreihe von Stadt.Geschichte.Basel / Christoph Merian Verlag,
