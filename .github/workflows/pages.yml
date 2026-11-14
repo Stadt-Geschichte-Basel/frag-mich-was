@@ -42,6 +42,10 @@ jobs:
           rm -f dist/CLAUDE.md
           test -s dist/index.html
           grep -q '<html lang="de-CH">' dist/index.html
+          test "$(grep -c '<title>Frag mich was – Stadt.Geschichte.Basel</title>' dist/index.html)" = 1
+          test "$(grep -c '<meta name="description"' dist/index.html)" = 1
+          test "$(grep -c '<link rel="canonical" href="https://dokumentation.stadtgeschichtebasel.ch/frag-mich-was/">' dist/index.html)" = 1
+          test "$(grep -c '<meta property="og:' dist/index.html)" = 7
           test -s dist/public/embeddings.json
           test -d dist/assets
 
