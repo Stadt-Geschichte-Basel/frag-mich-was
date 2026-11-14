@@ -73,6 +73,7 @@ body {
 .sgb-brand a:has(img):hover, .markdown .sgb-brand a:has(img):hover {
   background: transparent;
 }
+.sgb-footer a, .sgb-brand a { max-width: 100%; overflow-wrap: anywhere; }
 .sgb-footer { margin-top: 3rem; justify-content: flex-start; gap: 0.5rem 2rem; }
 h1, .markdown h1, .mo-markdown-renderer h1 {
   color: var(--sgb-purple);

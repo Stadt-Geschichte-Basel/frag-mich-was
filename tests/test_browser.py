@@ -218,6 +218,31 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
     page.close()
 
 
+def test_layout_reflows_at_320px_with_large_text(context: BrowserContext, site: str) -> None:
+    """With doubled text and extra spacing, no element may extend past the viewport.
+
+    marimo scrolls an inner container, so the document width alone shows nothing.
+    """
+    page = context.new_page()
+    page.set_viewport_size({"width": 320, "height": 700})
+    page.goto(site)
+    page.get_by_text("Du kannst alle", exact=False).wait_for(timeout=LOAD_TIMEOUT)
+    page.add_style_tag(
+        content="html{font-size:200%!important}"
+        "*{line-height:1.5!important;letter-spacing:.12em!important;word-spacing:.16em!important}"
+        "p{margin-bottom:2em!important}"
+    )
+    page.evaluate("document.querySelector('details').open = true")
+    clipped = page.evaluate(
+        """() => [...document.querySelectorAll('body *')]
+        .filter(e => getComputedStyle(e).position !== 'fixed'
+            && e.getBoundingClientRect().width > 0
+            && e.getBoundingClientRect().right > innerWidth + 1)
+        .map(e => e.tagName + ' ' + (e.textContent || '').slice(0, 30))"""
+    )
+    assert clipped == []
+
+
 def test_browser_vectors_match_python(context: BrowserContext, site: str) -> None:
     """The browser model and the Python model give the same vectors."""
     page = context.new_page()
