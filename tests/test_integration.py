@@ -33,6 +33,10 @@ def test_index_covers_each_content_file() -> None:
     assert {chunk.source for chunk in INDEX.chunks} == files
 
 
+def test_index_has_no_appendix() -> None:
+    assert not any(chunk.title.startswith("Anhang") for chunk in INDEX.chunks)
+
+
 def test_fixture_vectors_are_valid() -> None:
     assert [item["text"] for item in FIXTURE["sentences"]] == list(FIXTURE_SENTENCES)
     for item in FIXTURE["sentences"]:

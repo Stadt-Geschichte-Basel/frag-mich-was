@@ -2,7 +2,7 @@
 
 Frag mich was searches the chapters of Stadt.Geschichte.Basel by meaning.
 The interface uses Swiss Standard German (de-CH).
-The corpus contains German-language chapters, including introductions and appendices.
+The corpus contains German-language chapters, including introductions. It excludes appendices.
 Source quotations keep their original spelling.
 GitHub Pages hosts the static marimo WebAssembly application.
 The application has no backend or inference API.
@@ -72,7 +72,7 @@ uv run --group index python -m scripts.build_index
 
 The importer discovers `html/volume-*/sgb-*.html` files in stable order.
 It keeps headings, paragraphs, and sidebar text within `<main>`.
-It removes footnote markers, separate endnotes, and technical metadata.
+It skips each appendix chapter (`citation_title` `Anhang`). It removes footnote markers, separate endnotes, and technical metadata.
 Chapter and volume titles share the index title field.
 Authors remain in Markdown front matter. Missing authors do not exclude a chapter.
 

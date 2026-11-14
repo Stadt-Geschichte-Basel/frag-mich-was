@@ -412,7 +412,7 @@ def _():
     <summary>Über die Suche</summary>
     <p>Frag mich was ist ein Suchangebot des Projekts Stadt.Geschichte.Basel.
     Es erschliesst die Kapitel der Buchreihe von Stadt.Geschichte.Basel / Christoph Merian Verlag,
-    einschliesslich Einleitungen und Anhängen.</p>
+    einschliesslich der Einleitungen. Die Anhänge mit Verzeichnissen sind nicht enthalten.</p>
     <p>Die semantische Suche vergleicht die Bedeutung deiner Frage mit den Textstellen.
     Die Reihenfolge beruht auf sprachlicher Ähnlichkeit. Die Suche kann wichtige Stellen übersehen
     oder unpassende Stellen anzeigen. Die Textstellen sind keine geprüften Antworten auf deine Frage.

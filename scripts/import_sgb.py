@@ -114,8 +114,10 @@ class ChapterHTML(HTMLParser):
         )
 
 
-def convert(path: Path) -> str:
-    """Convert one chapter with required citation metadata.
+def convert(path: Path) -> str | None:
+    """Convert one chapter with required citation metadata. Return None for an appendix.
+
+    An appendix holds only bibliographies and registers. It is not searchable text.
 
     >>> from tempfile import TemporaryDirectory
     >>> with TemporaryDirectory() as directory:
@@ -126,12 +128,23 @@ def convert(path: Path) -> str:
     ...     except ValueError as error:
     ...         print(str(error).split(': ')[-1])
     missing citation_doi
+    >>> html = ''.join(
+    ...     f'<meta name="{n}" content="{v}">'
+    ...     for n, v in [("citation_doi", "1"), ("citation_title", "Anhang"), ("citation_inbook_title", "B")]
+    ... )
+    >>> with TemporaryDirectory() as directory:
+    ...     path = Path(directory) / 'a.html'
+    ...     _ = path.write_text(html + '<main>Text</main>')
+    ...     print(convert(path))
+    None
     """
     parser = ChapterHTML()
     parser.feed(path.read_text(encoding="utf-8"))
     for name in ("citation_doi", "citation_title", "citation_inbook_title"):
         if not any(parser.metadata.get(name, [])):
             raise ValueError(f"{path}: missing {name}")
+    if parser.metadata["citation_title"][0] == "Anhang":
+        return None
     body = parser.body()
     if not body:
         raise ValueError(f"{path}: empty main text")
@@ -167,7 +180,8 @@ def main() -> None:
     paths = sorted(args.checkout.glob("html/volume-*/sgb-*.html"))
     if not paths:
         raise ValueError("No chapter HTML files found.")
-    chapters = [(path.stem, convert(path)) for path in paths]
+    converted = [(path.stem, convert(path)) for path in paths]
+    chapters = [(stem, text) for stem, text in converted if text is not None]
     output = ROOT / "content"
     output.mkdir(exist_ok=True)
     for stem, text in chapters:
