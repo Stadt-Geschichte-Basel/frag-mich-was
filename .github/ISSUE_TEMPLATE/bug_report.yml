@@ -1,0 +1,28 @@
+name: Problem melden
+description: Die Suche liefert ein falsches Ergebnis oder funktioniert nicht.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Melde keine Sicherheitslücke hier. Lies [SECURITY.md](../blob/main/SECURITY.md).
+  - type: input
+    id: query
+    attributes:
+      label: Suchanfrage
+      description: Gib den genauen Text ein, den du gesucht hast.
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser und Version
+      placeholder: Firefox 150, macOS
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Erwartetes und tatsächliches Ergebnis
+      description: Nenne das Kapitel, das du erwartet hast, und das, was die Suche zeigt.
+    validations:
+      required: true
