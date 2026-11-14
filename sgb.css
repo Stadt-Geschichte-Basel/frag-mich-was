@@ -41,18 +41,39 @@ body {
   color: var(--sgb-text);
   font-family: var(--marimo-text-font);
 }
-.sgb-brand {
+.sgb-brand, .sgb-footer {
   background: var(--sgb-purple);
-  border-radius: 0.2rem;
-  padding: 1.5rem;
-  margin-bottom: 1.5rem;
+  color: #fff;
+  box-sizing: border-box;
+  width: 100vw;
+  max-width: none;
+  margin-inline: calc(50% - 50vw);
+  padding: 1.5rem max(1rem, calc(50vw - 50%));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
 }
+.sgb-brand { margin-bottom: 2rem; }
 .sgb-brand img {
   display: block;
   width: 180px;
   height: auto;
   max-width: 100%;
 }
+.sgb-brand a, .sgb-footer a, .markdown .sgb-brand a, .markdown .sgb-footer a {
+  color: #fff;
+  font-weight: 500;
+}
+.sgb-brand a:hover, .sgb-footer a:hover, .markdown .sgb-brand a:hover, .markdown .sgb-footer a:hover {
+  color: var(--sgb-purple);
+  background: var(--sgb-yellow);
+}
+.sgb-brand a:has(img):hover, .markdown .sgb-brand a:has(img):hover {
+  background: transparent;
+}
+.sgb-footer { margin-top: 3rem; justify-content: flex-start; gap: 0.5rem 2rem; }
 h1, .markdown h1, .mo-markdown-renderer h1 {
   color: var(--sgb-purple);
   font-weight: 600;
@@ -107,10 +128,8 @@ a:focus-visible, input:focus-visible, button:focus-visible, summary:focus-visibl
   gap: 1rem;
 }
 .sgb-results li {
-  border: 1px solid var(--sgb-purple);
-  border-left: 5px solid var(--sgb-yellow);
-  border-radius: 0.2rem;
-  padding: 1.25rem;
+  border-top: 1px solid var(--sgb-purple);
+  padding: 1.25rem 0;
   line-height: 1.65;
   overflow-wrap: anywhere;
 }
@@ -118,6 +137,8 @@ a:focus-visible, input:focus-visible, button:focus-visible, summary:focus-visibl
   color: var(--sgb-purple);
   font-size: 1.15rem;
   font-weight: 600;
+  margin: 0;
+  line-height: 1.5;
 }
 .sgb-results small {
   display: inline-block;
@@ -131,20 +152,17 @@ a:focus-visible, input:focus-visible, button:focus-visible, summary:focus-visibl
   background: var(--sgb-yellow);
 }
 @media (max-width: 600px) {
-  .sgb-brand { padding: 1rem; }
   .sgb-brand img { width: 150px; }
   h1 { font-size: 2rem; }
-  .sgb-results li { padding: 1rem; }
 }
 
-.sgb-results h2 {
-  margin: 0;
-  line-height: 1.5;
-}
 .sgb-results a {
   display: inline-flex;
   align-items: center;
   min-height: 24px;
+}
+.sgb-about {
+  overflow-wrap: anywhere;
 }
 .sgb-about summary {
   cursor: pointer;
@@ -153,4 +171,8 @@ a:focus-visible, input:focus-visible, button:focus-visible, summary:focus-visibl
 }
 a, button, input, summary {
   scroll-margin-block: 3rem;
+}
+/* Hide the marimo watermark. It has no class or setting, only this test hook. */
+[data-testid="watermark"] {
+  display: none;
 }

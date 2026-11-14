@@ -92,11 +92,11 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
     page = open_page(context, hosts, errors)
     page.goto(site)
     page.get_by_text(
-        f"Du kannst {len({chunk.url for chunk in INDEX.chunks})} Kapitel durchsuchen."
+        f"Du kannst alle {len({chunk.source[4:6] for chunk in INDEX.chunks})} Forschungsbände"
     ).wait_for(timeout=LOAD_TIMEOUT)
     page.reload()
     page.get_by_text(
-        f"Du kannst {len({chunk.url for chunk in INDEX.chunks})} Kapitel durchsuchen."
+        f"Du kannst alle {len({chunk.source[4:6] for chunk in INDEX.chunks})} Forschungsbände"
     ).wait_for(timeout=LOAD_TIMEOUT)
 
     assert page.locator("html").get_attribute("lang") == "de-CH"
@@ -124,6 +124,13 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
     assert (
         page.locator(".sgb-brand").evaluate("element => getComputedStyle(element).backgroundColor")
         == "rgb(58, 30, 62)"
+    )
+    viewport_width = page.evaluate("window.innerWidth")
+    for band in (".sgb-brand", ".sgb-footer"):
+        box = page.locator(band).bounding_box()
+        assert box is not None and abs(box["x"]) < 1 and abs(box["width"] - viewport_width) < 1
+    assert page.locator(".sgb-brand a.sgb-portal").get_attribute("href") == (
+        "https://stadtgeschichtebasel.ch/"
     )
     page.evaluate("document.fonts.ready")
     assert page.evaluate("document.fonts.check('16px \"Euclid Circular B\"')")
@@ -282,7 +289,7 @@ def test_model_failure_shows_retry(context: BrowserContext, site: str) -> None:
     page.route("https://huggingface.co/**", block)
     page.goto(site)
     page.get_by_text(
-        f"Du kannst {len({chunk.url for chunk in INDEX.chunks})} Kapitel durchsuchen."
+        f"Du kannst alle {len({chunk.source[4:6] for chunk in INDEX.chunks})} Forschungsbände"
     ).wait_for(timeout=LOAD_TIMEOUT)
     search(page, FIXTURE["reference"]["query"])
     page.get_by_text("Die Suche ist fehlgeschlagen.").wait_for(timeout=MODEL_TIMEOUT)
