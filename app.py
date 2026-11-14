@@ -257,9 +257,12 @@ def render_results(results: Sequence[tuple[Chunk, float]]) -> str:
 @app.cell
 def _():
     mo.md("""
-    <div class="sgb-brand">
+    <header class="sgb-brand">
+    <a href="https://stadtgeschichtebasel.ch/" aria-label="Stadt.Geschichte.Basel: zum Portal">
     <img src="public/sgb/assets/img/logo.svg" alt="Stadt.Geschichte.Basel" width="180" height="79">
-    </div>
+    </a>
+    <a class="sgb-portal" href="https://stadtgeschichtebasel.ch/">Zum Portal</a>
+    </header>
 
     # Frag mich was
 
@@ -267,6 +270,7 @@ def _():
 
     Finde Textstellen in den Kapiteln von Stadt.Geschichte.Basel.
     Stelle eine Frage oder gib ein Thema ein.
+    Jede Textstelle führt zum Originalkapitel.
     """)
     return
 
@@ -315,9 +319,13 @@ def _(index, index_error):
             kind="warn",
         )
     else:
-        _works = len({chunk.url or chunk.source for chunk in index.chunks})
+        _volumes = len({chunk.source[4:6] for chunk in index.chunks})
         _status = mo.callout(
-            mo.Html(f'<p role="status">Du kannst {_works} Kapitel durchsuchen.</p>'),
+            mo.Html(
+                f'<p role="status">Du kannst alle {_volumes} '
+                '<a href="https://emono.unibas.ch/stadtgeschichtebasel/catalog">Forschungsbände</a> '
+                "von Stadt.Geschichte.Basel durchsuchen.</p>"
+            ),
             kind="success",
         )
     _status
@@ -431,6 +439,20 @@ def _():
     Den <a href="https://github.com/Stadt-Geschichte-Basel/frag-mich-was">Quellcode</a>
     findest du auf GitHub. Die Software steht unter AGPL-3.0.</p>
     </details>
+    """)
+    return
+
+
+@app.cell
+def _():
+    mo.Html("""
+    <footer class="sgb-footer">
+    <a href="https://stadtgeschichtebasel.ch/">Stadt.Geschichte.Basel</a>
+    <a href="https://dokumentation.stadtgeschichtebasel.ch/">Dokumentation</a>
+    <a href="https://stadtgeschichtebasel.ch/datenschutzerklaerung">Datenschutz</a>
+    <a href="https://stadtgeschichtebasel.ch/barrierefreiheitserklaerung">Barrierefreiheit</a>
+    <a href="https://github.com/Stadt-Geschichte-Basel/frag-mich-was">Quellcode</a>
+    </footer>
     """)
     return
 

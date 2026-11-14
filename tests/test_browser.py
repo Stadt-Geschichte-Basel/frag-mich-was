@@ -92,11 +92,11 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
     page = open_page(context, hosts, errors)
     page.goto(site)
     page.get_by_text(
-        f"Du kannst {len({chunk.url for chunk in INDEX.chunks})} Kapitel durchsuchen."
+        f"Du kannst alle {len({chunk.source[4:6] for chunk in INDEX.chunks})} Forschungsbände"
     ).wait_for(timeout=LOAD_TIMEOUT)
     page.reload()
     page.get_by_text(
-        f"Du kannst {len({chunk.url for chunk in INDEX.chunks})} Kapitel durchsuchen."
+        f"Du kannst alle {len({chunk.source[4:6] for chunk in INDEX.chunks})} Forschungsbände"
     ).wait_for(timeout=LOAD_TIMEOUT)
 
     assert page.locator("html").get_attribute("lang") == "de-CH"
@@ -124,6 +124,13 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
     assert (
         page.locator(".sgb-brand").evaluate("element => getComputedStyle(element).backgroundColor")
         == "rgb(58, 30, 62)"
+    )
+    viewport_width = page.evaluate("window.innerWidth")
+    for band in (".sgb-brand", ".sgb-footer"):
+        box = page.locator(band).bounding_box()
+        assert box is not None and abs(box["x"]) < 1 and abs(box["width"] - viewport_width) < 1
+    assert page.locator(".sgb-brand a.sgb-portal").get_attribute("href") == (
+        "https://stadtgeschichtebasel.ch/"
     )
     page.evaluate("document.fonts.ready")
     assert page.evaluate("document.fonts.check('16px \"Euclid Circular B\"')")
@@ -211,6 +218,31 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
     page.close()
 
 
+def test_layout_reflows_at_320px_with_large_text(context: BrowserContext, site: str) -> None:
+    """With doubled text and extra spacing, no element may extend past the viewport.
+
+    marimo scrolls an inner container, so the document width alone shows nothing.
+    """
+    page = context.new_page()
+    page.set_viewport_size({"width": 320, "height": 700})
+    page.goto(site)
+    page.get_by_text("Du kannst alle", exact=False).wait_for(timeout=LOAD_TIMEOUT)
+    page.add_style_tag(
+        content="html{font-size:200%!important}"
+        "*{line-height:1.5!important;letter-spacing:.12em!important;word-spacing:.16em!important}"
+        "p{margin-bottom:2em!important}"
+    )
+    page.evaluate("document.querySelector('details').open = true")
+    clipped = page.evaluate(
+        """() => [...document.querySelectorAll('body *')]
+        .filter(e => getComputedStyle(e).position !== 'fixed'
+            && e.getBoundingClientRect().width > 0
+            && e.getBoundingClientRect().right > innerWidth + 1)
+        .map(e => e.tagName + ' ' + (e.textContent || '').slice(0, 30))"""
+    )
+    assert clipped == []
+
+
 def test_browser_vectors_match_python(context: BrowserContext, site: str) -> None:
     """The browser model and the Python model give the same vectors."""
     page = context.new_page()
@@ -282,7 +314,7 @@ def test_model_failure_shows_retry(context: BrowserContext, site: str) -> None:
     page.route("https://huggingface.co/**", block)
     page.goto(site)
     page.get_by_text(
-        f"Du kannst {len({chunk.url for chunk in INDEX.chunks})} Kapitel durchsuchen."
+        f"Du kannst alle {len({chunk.source[4:6] for chunk in INDEX.chunks})} Forschungsbände"
     ).wait_for(timeout=LOAD_TIMEOUT)
     search(page, FIXTURE["reference"]["query"])
     page.get_by_text("Die Suche ist fehlgeschlagen.").wait_for(timeout=MODEL_TIMEOUT)
