@@ -2,7 +2,10 @@ import marimo
 
 __generated_with = "0.25.2"
 app = marimo.App(
-    width="medium", app_title="Frag mich was", css_file="sgb.css", html_head_file="head.html"
+    width="medium",
+    app_title="Frag mich was – Stadt.Geschichte.Basel",
+    css_file="sgb.css",
+    html_head_file="head.html",
 )
 
 with app.setup:
