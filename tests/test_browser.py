@@ -243,6 +243,38 @@ def test_layout_reflows_at_320px_with_large_text(context: BrowserContext, site: 
     assert clipped == []
 
 
+@pytest.mark.parametrize(
+    ("width", "height", "large_text"), [(390, 900, False), (1280, 900, False), (320, 700, True)]
+)
+def test_footer_ends_the_page(
+    context: BrowserContext, site: str, width: int, height: int, large_text: bool
+) -> None:
+    """No white space may follow the footer inside marimo's scroll container."""
+    page = context.new_page()
+    page.set_viewport_size({"width": width, "height": height})
+    page.goto(site)
+    page.get_by_text("Du kannst alle", exact=False).wait_for(timeout=LOAD_TIMEOUT)
+    if large_text:
+        page.add_style_tag(
+            content="html{font-size:200%!important}"
+            "*{line-height:1.5!important;letter-spacing:.12em!important;word-spacing:.16em!important}"
+        )
+    gap = page.evaluate(
+        """() => {
+        const footer = document.querySelector('.sgb-footer');
+        let node = footer.parentElement;
+        while (node && node.scrollHeight <= node.clientHeight + 1) node = node.parentElement;
+        const scroller = node || document.scrollingElement;
+        scroller.scrollTop = scroller.scrollHeight;
+        const bottom = scroller === document.scrollingElement
+            ? innerHeight : scroller.getBoundingClientRect().bottom;
+        return bottom - footer.getBoundingClientRect().bottom;
+    }"""
+    )
+    assert -1 <= gap <= 1, f"{gap}px below the footer"
+    page.close()
+
+
 def test_browser_vectors_match_python(context: BrowserContext, site: str) -> None:
     """The browser model and the Python model give the same vectors."""
     page = context.new_page()

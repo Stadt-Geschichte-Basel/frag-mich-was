@@ -75,6 +75,9 @@ body {
 }
 .sgb-footer a, .sgb-brand a { max-width: 100%; overflow-wrap: anywhere; }
 .sgb-footer { margin-top: 3rem; justify-content: flex-start; gap: 0.5rem 2rem; }
+/* End the page at the footer. Remove marimo's bottom padding and the output margin below it. */
+[class*="pb-24"]:has(.sgb-footer) { padding-bottom: 0; }
+.marimo-cell.published .output-area .output:has(> .sgb-footer) { margin-bottom: 0; }
 h1, .markdown h1, .mo-markdown-renderer h1 {
   color: var(--sgb-purple);
   font-weight: 600;
