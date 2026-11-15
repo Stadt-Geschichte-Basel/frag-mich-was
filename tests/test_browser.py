@@ -71,7 +71,7 @@ def open_page(context: BrowserContext, hosts: set[str], errors: list[str]) -> Pa
 
 
 def search(page: Page, query: str) -> None:
-    field = page.get_by_role("textbox", name="Was möchtest du über Basels Geschichte wissen?")
+    field = page.get_by_role("textbox", name="Wonach suchst du in Basels Geschichte?")
     field.fill(query)
     field.press("Tab")
     button = page.get_by_role("button", name="Suchen")
@@ -101,8 +101,14 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
 
     assert page.locator("html").get_attribute("lang") == "de-CH"
     assert page.locator('meta[name="theme-color"]').count() == 1
-    assert page.title() == "Frag mich was – Stadt.Geschichte.Basel"
+    assert page.title() == "Frag mich was – Semantische Suche | Stadt.Geschichte.Basel"
     assert page.locator('meta[name="description"]').count() == 1
+    assert "Semantische Suchmaschine" in (
+        page.locator('meta[name="description"]').get_attribute("content") or ""
+    )
+    assert page.get_by_text(
+        "Semantische Suchmaschine für die Forschungsbände und Data Stories von Stadt.Geschichte.Basel."
+    ).is_visible()
     assert page.locator('link[rel="canonical"]').count() == 1
     assert page.locator('meta[property^="og:"]').count() == 7
     assert page.locator('meta[name="theme-color"]').get_attribute("content") == "#3a1e3e"
