@@ -78,6 +78,20 @@ body {
 /* End the page at the footer. Remove marimo's bottom padding and the output margin below it. */
 [class*="pb-24"]:has(.sgb-footer) { padding-bottom: 0; }
 .marimo-cell.published .output-area .output:has(> .sgb-footer) { margin-bottom: 0; }
+/* Let the footer use remaining space when the initial page is short. */
+.mathjax_ignore:has(.sgb-footer) > [class*="pb-24"],
+[class*="pb-24"]:has(.sgb-footer) > [class*="pb-24"] {
+  display: flex;
+  flex-direction: column;
+  flex: 1 0 auto;
+}
+[class*="pb-24"]:has(.sgb-footer) > [class*="pb-24"] {
+  width: 100%;
+  margin-block: 0;
+}
+[class*="pb-24"]:has(.sgb-footer) > .flex.flex-col { flex: 1; }
+.marimo-cell.published:has(.sgb-footer) { margin-top: auto; }
+.sgb-corpus { overflow-wrap: anywhere; }
 h1, .markdown h1, .mo-markdown-renderer h1 {
   color: var(--sgb-purple);
   font-weight: 600;
@@ -87,12 +101,12 @@ h1, .markdown h1, .mo-markdown-renderer h1 {
   text-decoration-thickness: 4px;
   text-underline-offset: 0.2em;
 }
-.markdown a, .sgb-results a, .sgb-about a {
+.markdown a, .sgb-results a, .sgb-about a, .sgb-corpus a {
   color: var(--sgb-blue);
   text-decoration: underline;
   text-underline-offset: 0.15em;
 }
-.markdown a:hover, .sgb-results a:hover, .sgb-about a:hover {
+.markdown a:hover, .sgb-results a:hover, .sgb-about a:hover, .sgb-corpus a:hover {
   color: var(--sgb-purple);
   background: var(--sgb-yellow);
 }

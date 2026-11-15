@@ -298,11 +298,9 @@ def _():
 
     # Frag mich was
 
-    **Semantische Suchmaschine für die Forschungsbände und Data Stories von Stadt.Geschichte.Basel.**
+    **Semantische Suchmaschine für Basels Geschichte.**
 
-    Suche nach einem Thema oder stelle eine Frage. Die Suchmaschine findet inhaltlich
-    passende Textstellen – auch wenn sie andere Wörter verwenden als deine Anfrage.
-    Du siehst Auszüge mit Links zu den Originalpublikationen, keine generierten Antworten.
+    Finde passende Textstellen und öffne die Originalpublikationen.
     """)
     return
 
@@ -352,14 +350,11 @@ def _(index, index_error):
         )
     else:
         _volumes, _stories = corpus_counts(index.chunks)
-        _status = mo.callout(
-            mo.Html(
-                f'<p role="status">Du kannst alle {_volumes} '
-                '<a href="https://emono.unibas.ch/stadtgeschichtebasel/catalog">Forschungsbände</a> '
-                f'und {_stories} <a href="https://stadtgeschichtebasel.ch/data-stories">Data Stories</a> '
-                "von Stadt.Geschichte.Basel durchsuchen.</p>"
-            ),
-            kind="success",
+        _status = mo.Html(
+            f'<p class="sgb-corpus" role="status">{_volumes} '
+            '<a href="https://emono.unibas.ch/stadtgeschichtebasel/catalog">Forschungsbände</a> '
+            f'und {_stories} <a href="https://stadtgeschichtebasel.ch/data-stories">Data Stories</a> '
+            "durchsuchen.</p>"
         )
     _status
     return
@@ -374,12 +369,7 @@ def _(index):
         full_width=True,
     ).form(submit_button_label="Suchen", bordered=False)
     retry = mo.ui.run_button(label="Erneut versuchen")
-    mo.vstack(
-        [
-            form,
-            mo.md("Suche nach Themen, Ereignissen oder stelle eine Frage."),
-        ]
-    )
+    form
     return form, retry
 
 
@@ -393,8 +383,12 @@ def _():
 @app.cell
 async def _(form, index, retry, session):
     retry.value  # A click on Retry runs this cell again.
+    mo.stop(form.value is None)
     _query = (form.value or "").strip()
-    mo.stop(not _query, mo.md("Gib eine Frage oder ein Thema ein. Wähle dann **Suchen**."))
+    mo.stop(
+        not _query,
+        mo.Html('<p role="status">Gib ein Thema oder eine Frage ein. Wähle dann «Suchen».</p>'),
+    )
     mo.stop(
         not IS_WASM,
         mo.callout(
@@ -426,8 +420,8 @@ async def _(form, index, retry, session):
         _output = mo.vstack(
             [
                 mo.md(
-                    "Die Suche zeigt passende Textstellen, keine automatisch generierten Antworten. "
-                    "Der Link führt zur Originalpublikation."
+                    "Die Ergebnisse sind Textauszüge aus den Originalpublikationen, "
+                    "keine generierten Antworten."
                 ),
                 mo.Html(render_results(rank(_vector, index.chunks))),
             ]
@@ -461,9 +455,9 @@ def _():
     Alle Data Stories tragen den gemeinsamen Bandtitel «Data Stories».</p>
     <p>Die Suche vergleicht die Bedeutung deiner Eingabe mit den Textstellen.
     Die Reihenfolge beruht auf sprachlicher Ähnlichkeit. Die Suche kann wichtige Stellen übersehen
-    oder unpassende Stellen anzeigen. Die Textstellen sind keine geprüften Antworten auf deine Frage.
+    oder unpassende Stellen anzeigen. Die Textstellen sind keine geprüften Antworten auf deine Eingabe.
     Prüfe die Aussage und ihren Zusammenhang in der Originalpublikation.</p>
-    <p>Deine Frage wird lokal in deinem Browser verarbeitet und bleibt auf deinem Gerät.
+    <p>Deine Eingabe wird lokal in deinem Browser verarbeitet und bleibt auf deinem Gerät.
     Beim ersten Besuch braucht die Seite eine Internetverbindung.
     Die erste Suche lädt ein Sprachmodell von etwa 120 MB herunter.
     Die Links «Originalkapitel öffnen» führen über die DOI zur jeweiligen Publikation.
