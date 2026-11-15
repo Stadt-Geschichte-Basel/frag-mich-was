@@ -92,11 +92,11 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
     page = open_page(context, hosts, errors)
     page.goto(site)
     page.get_by_text(
-        f"Du kannst alle {len({chunk.source[4:6] for chunk in INDEX.chunks})} Forschungsbände"
+        f"Du kannst alle {len({chunk.source[4:6] for chunk in INDEX.chunks if chunk.content_type == 'chapter'})} Forschungsbände"
     ).wait_for(timeout=LOAD_TIMEOUT)
     page.reload()
     page.get_by_text(
-        f"Du kannst alle {len({chunk.source[4:6] for chunk in INDEX.chunks})} Forschungsbände"
+        f"Du kannst alle {len({chunk.source[4:6] for chunk in INDEX.chunks if chunk.content_type == 'chapter'})} Forschungsbände"
     ).wait_for(timeout=LOAD_TIMEOUT)
 
     assert page.locator("html").get_attribute("lang") == "de-CH"
@@ -157,7 +157,9 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
     items.first.wait_for(timeout=MODEL_TIMEOUT)
     texts = [" ".join(text.split()) for text in items.all_inner_texts()]
     assert 1 <= len(texts) <= 5
-    assert page.get_by_role("status").filter(has_text="passende Kapitel gefunden").count() == 1
+    assert (
+        page.get_by_role("status").filter(has_text="passende Publikationen gefunden").count() == 1
+    )
     assert items.get_by_role("heading", level=2).count() == len(texts)
     assert page.locator("ol.sgb-results").get_attribute("role") == "list"
     result_link = items.first.get_by_role("link")
@@ -173,7 +175,10 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
 
     links = items.locator("a").evaluate_all("links => links.map(link => link.href)")
     assert len(set(links)) == len(texts)
-    assert all(link.startswith("https://doi.org/") for link in links)
+    assert all(
+        link.startswith(("https://doi.org/", "https://storymaps.arcgis.com/stories/"))
+        for link in links
+    )
     page.mouse.move(0, 0)
     assert (
         page.get_by_role("button", name="Suchen").evaluate(
@@ -313,7 +318,7 @@ def test_browser_vectors_match_python(context: BrowserContext, site: str) -> Non
         (
             200,
             json.dumps({"schema_version": 1, "model": FIXTURE["model"], "chunks": []}),
-            "Zurzeit sind keine Kapitel verfügbar. Versuche es später nochmals.",
+            "Zurzeit sind keine Publikationen verfügbar. Versuche es später nochmals.",
         ),
     ],
 )
@@ -346,7 +351,7 @@ def test_model_failure_shows_retry(context: BrowserContext, site: str) -> None:
     page.route("https://huggingface.co/**", block)
     page.goto(site)
     page.get_by_text(
-        f"Du kannst alle {len({chunk.source[4:6] for chunk in INDEX.chunks})} Forschungsbände"
+        f"Du kannst alle {len({chunk.source[4:6] for chunk in INDEX.chunks if chunk.content_type == 'chapter'})} Forschungsbände"
     ).wait_for(timeout=LOAD_TIMEOUT)
     search(page, FIXTURE["reference"]["query"])
     page.get_by_text("Die Suche ist fehlgeschlagen.").wait_for(timeout=MODEL_TIMEOUT)
@@ -358,3 +363,30 @@ def test_model_failure_shows_retry(context: BrowserContext, site: str) -> None:
     page.locator("ol li").first.wait_for(timeout=MODEL_TIMEOUT)
     assert not errors
     fresh.close()
+
+
+def test_story_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -> None:
+    """Retrieve a story with real inference and preserve the common volume title."""
+    page = context.new_page()
+    page.goto(site)
+    page.get_by_role("status").filter(has_text="und 7 Data Stories").wait_for(timeout=LOAD_TIMEOUT)
+    reference = FIXTURE["story_references"][-1]
+    search(page, reference["query"])
+    link = page.locator(f'ol.sgb-results a[href="{reference["expected_url"]}"]')
+    link.wait_for(timeout=MODEL_TIMEOUT)
+    assert (link.get_attribute("aria-label") or "").startswith("Originalstory öffnen:")
+    assert link.get_attribute("rel") == "noopener noreferrer"
+    assert link.get_attribute("target") == "_blank"
+    result = page.locator("ol.sgb-results li").filter(
+        has=page.locator(f'a[href="{reference["expected_url"]}"]')
+    )
+    assert result.get_by_role("heading").inner_text().endswith(" — Data Stories")
+    assert "Nur Zusammenfassung" not in result.inner_text()
+    links = page.locator("ol.sgb-results a").evaluate_all("links => links.map(link => link.href)")
+    assert len(links) == len(set(links)) <= 5
+    result.screenshot(path=str(tmp_path / "story-result-desktop.png"))
+    for width in (390, 320):
+        page.set_viewport_size({"width": width, "height": 844})
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        result.screenshot(path=str(tmp_path / f"story-result-{width}.png"))
+    page.close()

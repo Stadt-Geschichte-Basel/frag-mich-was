@@ -51,6 +51,34 @@ FIXTURE_SENTENCES = (
 REFERENCE_QUERY = "Welche Rolle spielte die Rheinfischerei für Basel?"
 REFERENCE_EXPECTED_URL = "https://doi.org/10.21255/sgb-09.03-874521"
 
+STORY_REFERENCES = (
+    (
+        "Wie wurden Schulden im mittelalterlichen Basel vor Gericht geregelt?",
+        "1955ccada8d74ff6919e9e1397cb168a",
+    ),
+    (
+        "Welche Briefe schrieb Emanuel Falkeisen aus Bursa an Basler Seidenbandfirmen?",
+        "90a309d6d21342608d0ad3ee16fb3f30",
+    ),
+    (
+        "Welche Rolle spielten kirchliche Grundherren beim Hausbesitz in Basel?",
+        "34ef391bd4fa419cb82d488906608154",
+    ),
+    (
+        "Wie verbreiteten sich Tabakkonsum und Schnupftabak in Basel?",
+        "e2096bc80f714932b8eba10ee7e23b4b",
+    ),
+    ("Wie beschäftigte sich das Basler Konzil mit dem Koran?", "0cac069fdac24f13a06377a1c7294a33"),
+    (
+        "Was verraten die Skelette vom Basler Waisenhaus über das Leben in der Spätantike?",
+        "54d35e03bcdf4841b092d4c4906227e9",
+    ),
+    (
+        "Wie digitalisierte das Kontrollbüro die Einwohnerkontrolle in Basel?",
+        "6be823309a7b4254aa27b5486703b68b",
+    ),
+)
+
 SENTENCE_END = re.compile(r"(?<=[.!?…])\s+(?=[A-ZÄÖÜ\"„«“(\[])")
 
 
@@ -62,6 +90,8 @@ class Document:
     title: str
     url: str | None
     body: str
+    content_type: str = "chapter"
+    coverage: str = "full_text"
 
 
 def parse_document(name: str, raw: str) -> Document:
@@ -85,7 +115,14 @@ def parse_document(name: str, raw: str) -> Document:
                 value = value.strip()
                 meta[key.strip()] = json.loads(value) if value.startswith('"') else value
     title = meta.get("title") or Path(name).stem.replace("-", " ").replace("_", " ").capitalize()
-    return Document(source=name, title=title, url=meta.get("url") or None, body=body)
+    return Document(
+        source=name,
+        title=title,
+        url=meta.get("url") or None,
+        body=body,
+        content_type=meta.get("content_type", "chapter"),
+        coverage=meta.get("coverage", "full_text"),
+    )
 
 
 def clean_markdown(text: str) -> str:
@@ -176,7 +213,7 @@ def build_chunks(
 
     >>> doc = Document(source="a.md", title="A", url=None, body="One two.")
     >>> build_chunks([doc], lambda text: len(text.split()))
-    [{'id': 'a:0001', 'title': 'A', 'text': 'One two.', 'source': 'a.md', 'url': None}]
+    [{'id': 'a:0001', 'title': 'A', 'text': 'One two.', 'source': 'a.md', 'url': None, 'content_type': 'chapter', 'coverage': 'full_text'}]
     """
     records: list[dict[str, object]] = []
     for document in documents:
@@ -190,6 +227,8 @@ def build_chunks(
                     "text": text,
                     "source": document.source,
                     "url": document.url,
+                    "content_type": document.content_type,
+                    "coverage": document.coverage,
                 }
             )
     return records
@@ -251,6 +290,18 @@ def main() -> None:  # pragma: no cover - needs the embedding model; tests read 
         "sentences": [
             {"text": sentence, "embedding": vector}
             for sentence, vector in zip(FIXTURE_SENTENCES, embed(FIXTURE_SENTENCES), strict=True)
+        ],
+        "story_references": [
+            {
+                "query": query,
+                "expected_url": f"https://storymaps.arcgis.com/stories/{item_id}",
+                "embedding": vector,
+            }
+            for (query, item_id), vector in zip(
+                STORY_REFERENCES,
+                embed([MODEL.query_prefix + query for query, _ in STORY_REFERENCES]),
+                strict=True,
+            )
         ],
         "reference": {
             "query": REFERENCE_QUERY,

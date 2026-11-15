@@ -45,6 +45,8 @@ def chunk_data(**override: Any) -> dict[str, Any]:
         "source": "a.md",
         "url": None,
         "embedding": [0.6, 0.8],
+        "content_type": "chapter",
+        "coverage": "full_text",
     }
     return data | override
 
