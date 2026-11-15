@@ -3,7 +3,7 @@ import marimo
 __generated_with = "0.25.2"
 app = marimo.App(
     width="medium",
-    app_title="Frag mich was – Stadt.Geschichte.Basel",
+    app_title="Frag mich was – Semantische Suche | Stadt.Geschichte.Basel",
     css_file="sgb.css",
     html_head_file="head.html",
 )
@@ -298,11 +298,11 @@ def _():
 
     # Frag mich was
 
-    **Fragen stellen. Geschichte finden.**
+    **Semantische Suchmaschine für die Forschungsbände und Data Stories von Stadt.Geschichte.Basel.**
 
-    Finde Textstellen in den Forschungsbänden und Data Stories von Stadt.Geschichte.Basel.
-    Stelle eine Frage oder gib ein Thema ein.
-    Jede Textstelle führt zur Originalpublikation.
+    Suche nach einem Thema oder stelle eine Frage. Die Suchmaschine findet inhaltlich
+    passende Textstellen – auch wenn sie andere Wörter verwenden als deine Anfrage.
+    Du siehst Auszüge mit Links zu den Originalpublikationen, keine generierten Antworten.
     """)
     return
 
@@ -369,15 +369,15 @@ def _(index, index_error):
 def _(index):
     mo.stop(index is None or not index.chunks)
     form = mo.ui.text(
-        label="Was möchtest du über Basels Geschichte wissen?",
-        placeholder="Welche Bedeutung hatte der Rhein für Basel?",
+        label="Wonach suchst du in Basels Geschichte?",
+        placeholder="Rhein und Handel in Basel",
         full_width=True,
     ).form(submit_button_label="Suchen", bordered=False)
     retry = mo.ui.run_button(label="Erneut versuchen")
     mo.vstack(
         [
             form,
-            mo.md("Auch verwandte Begriffe können passende Textstellen finden."),
+            mo.md("Suche nach Themen, Ereignissen oder stelle eine Frage."),
         ]
     )
     return form, retry
@@ -454,12 +454,12 @@ def _():
     mo.Html("""
     <details class="sgb-about">
     <summary>Über die Suche</summary>
-    <p>Frag mich was ist ein Suchangebot des Projekts Stadt.Geschichte.Basel.
-    Es erschliesst die Kapitel der Buchreihe von Stadt.Geschichte.Basel / Christoph Merian Verlag,
-    einschliesslich der Einleitungen. Die Anhänge mit Verzeichnissen sind nicht enthalten.
-    Dazu kommen die Erzähltexte von sieben Data Stories. «Das jüdische Basel» ist nicht enthalten.
+    <p>Frag mich was ist eine semantische Suchmaschine für die Forschungsbände
+    von Stadt.Geschichte.Basel / Christoph Merian Verlag und sieben Data Stories.
+    Sie durchsucht die Kapitel einschliesslich der Einleitungen sowie die Erzähltexte
+    der Data Stories. Die Anhänge mit Verzeichnissen und «Das jüdische Basel» sind nicht enthalten.
     Alle Data Stories tragen den gemeinsamen Bandtitel «Data Stories».</p>
-    <p>Die semantische Suche vergleicht die Bedeutung deiner Frage mit den Textstellen.
+    <p>Die Suche vergleicht die Bedeutung deiner Eingabe mit den Textstellen.
     Die Reihenfolge beruht auf sprachlicher Ähnlichkeit. Die Suche kann wichtige Stellen übersehen
     oder unpassende Stellen anzeigen. Die Textstellen sind keine geprüften Antworten auf deine Frage.
     Prüfe die Aussage und ihren Zusammenhang in der Originalpublikation.</p>
