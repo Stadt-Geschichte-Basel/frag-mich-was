@@ -76,7 +76,17 @@ def is_safe_url(url: str) -> bool:
     except ValueError:
         return False
     if parts.scheme == "https":
-        return parts.hostname in APPROVED_URL_HOSTS
+        return parts.hostname in APPROVED_URL_HOSTS or (
+            parts.hostname == "storymaps.arcgis.com"
+            and parts.username is None
+            and parts.password is None
+            and parts.netloc == "storymaps.arcgis.com"
+            and len(parts.path.removeprefix("/stories/")) == 32
+            and parts.path.startswith("/stories/")
+            and all(char in "0123456789abcdef" for char in parts.path[9:])
+            and not parts.query
+            and not parts.fragment
+        )
     return not parts.scheme and not parts.netloc
 
 
@@ -136,6 +146,8 @@ class Chunk(BaseModel):
     text: str = Field(min_length=1)
     source: str = Field(min_length=1)
     url: str | None = None
+    content_type: Literal["chapter", "data_story"] = "chapter"
+    coverage: Literal["full_text", "summary"] = "full_text"
     embedding: list[FiniteFloat]
 
     @field_validator("title", "text")
@@ -206,7 +218,7 @@ def load_index(raw: str) -> SearchIndex:
 def rank(
     query: Sequence[float], chunks: Sequence[Chunk], top_k: int = TOP_K
 ) -> list[tuple[Chunk, float]]:
-    """Return each DOI’s best passage by dot product. Break a tie by chunk ID.
+    """Return each publication’s best passage by dot product. Break a tie by chunk ID.
 
     The vectors have unit length, so the dot product is the cosine similarity.
 
@@ -224,12 +236,24 @@ def rank(
 
 
 @app.function
+def corpus_counts(chunks: Sequence[Chunk]) -> tuple[int, int]:
+    """Count book volumes and distinct Data Stories separately.
+
+    >>> corpus_counts([])
+    (0, 0)
+    """
+    volumes = {chunk.source[4:6] for chunk in chunks if chunk.content_type == "chapter"}
+    stories = {chunk.url for chunk in chunks if chunk.content_type == "data_story"}
+    return len(volumes), len(stories)
+
+
+@app.function
 def render_results(results: Sequence[tuple[Chunk, float]]) -> str:
     """Render ranked passages as HTML. Escape every value that comes from the index.
 
     >>> chunk = Chunk(id="a", title="<A>", text="x & y", source="a.md", embedding=[1.0])
     >>> render_results([(chunk, 0.5)])
-    '<p role="status" aria-atomic="true">1 passende Kapitel gefunden.</p><ol class="sgb-results" role="list"><li><h2>&lt;A&gt;</h2><p>x &amp; y</p></li></ol>'
+    '<p role="status" aria-atomic="true">1 passende Publikationen gefunden.</p><ol class="sgb-results" role="list"><li><h2>&lt;A&gt;</h2><p>x &amp; y</p></li></ol>'
     >>> render_results([])
     '<p role="status" aria-atomic="true">Keine Textstelle gefunden.</p>'
     """
@@ -238,18 +262,26 @@ def render_results(results: Sequence[tuple[Chunk, float]]) -> str:
     items: list[str] = []
     for chunk, _score in results:
         link = ""
+        label = (
+            "Originalstory öffnen"
+            if chunk.content_type == "data_story"
+            else "Originalkapitel öffnen"
+        )
+        coverage = (
+            "<p><small>Nur Zusammenfassung</small></p>" if chunk.coverage == "summary" else ""
+        )
         if chunk.url is not None:
             href = html.escape(chunk.url, quote=True)
             link = (
                 f'<small><a href="{href}" target="_blank" rel="noopener noreferrer" '
-                f'aria-label="Originalkapitel öffnen: {html.escape(chunk.title, quote=True)}">'
-                "Originalkapitel öffnen</a></small>"
+                f'aria-label="{label}: {html.escape(chunk.title, quote=True)}">'
+                f"{label}</a></small>"
             )
         items.append(
-            f"<li><h2>{html.escape(chunk.title)}</h2>{link}<p>{html.escape(chunk.text)}</p></li>"
+            f"<li><h2>{html.escape(chunk.title)}</h2>{link}{coverage}<p>{html.escape(chunk.text)}</p></li>"
         )
     return (
-        f'<p role="status" aria-atomic="true">{len(results)} passende Kapitel gefunden.</p>'
+        f'<p role="status" aria-atomic="true">{len(results)} passende Publikationen gefunden.</p>'
         f'<ol class="sgb-results" role="list">{"".join(items)}</ol>'
     )
 
@@ -268,9 +300,9 @@ def _():
 
     **Fragen stellen. Geschichte finden.**
 
-    Finde Textstellen in den Kapiteln von Stadt.Geschichte.Basel.
+    Finde Textstellen in den Forschungsbänden und Data Stories von Stadt.Geschichte.Basel.
     Stelle eine Frage oder gib ein Thema ein.
-    Jede Textstelle führt zum Originalkapitel.
+    Jede Textstelle führt zur Originalpublikation.
     """)
     return
 
@@ -314,16 +346,17 @@ def _(index, index_error):
     elif not index.chunks:
         _status = mo.callout(
             mo.Html(
-                '<p role="status">Zurzeit sind keine Kapitel verfügbar. Versuche es später nochmals.</p>'
+                '<p role="status">Zurzeit sind keine Publikationen verfügbar. Versuche es später nochmals.</p>'
             ),
             kind="warn",
         )
     else:
-        _volumes = len({chunk.source[4:6] for chunk in index.chunks})
+        _volumes, _stories = corpus_counts(index.chunks)
         _status = mo.callout(
             mo.Html(
                 f'<p role="status">Du kannst alle {_volumes} '
                 '<a href="https://emono.unibas.ch/stadtgeschichtebasel/catalog">Forschungsbände</a> '
+                f'und {_stories} <a href="https://stadtgeschichtebasel.ch/data-stories">Data Stories</a> '
                 "von Stadt.Geschichte.Basel durchsuchen.</p>"
             ),
             kind="success",
@@ -394,7 +427,7 @@ async def _(form, index, retry, session):
             [
                 mo.md(
                     "Die Suche zeigt passende Textstellen, keine automatisch generierten Antworten. "
-                    "Der Link führt zum Originalkapitel."
+                    "Der Link führt zur Originalpublikation."
                 ),
                 mo.Html(render_results(rank(_vector, index.chunks))),
             ]
@@ -423,19 +456,26 @@ def _():
     <summary>Über die Suche</summary>
     <p>Frag mich was ist ein Suchangebot des Projekts Stadt.Geschichte.Basel.
     Es erschliesst die Kapitel der Buchreihe von Stadt.Geschichte.Basel / Christoph Merian Verlag,
-    einschliesslich der Einleitungen. Die Anhänge mit Verzeichnissen sind nicht enthalten.</p>
+    einschliesslich der Einleitungen. Die Anhänge mit Verzeichnissen sind nicht enthalten.
+    Dazu kommen die Erzähltexte von sieben Data Stories. «Das jüdische Basel» ist nicht enthalten.
+    Alle Data Stories tragen den gemeinsamen Bandtitel «Data Stories».</p>
     <p>Die semantische Suche vergleicht die Bedeutung deiner Frage mit den Textstellen.
     Die Reihenfolge beruht auf sprachlicher Ähnlichkeit. Die Suche kann wichtige Stellen übersehen
     oder unpassende Stellen anzeigen. Die Textstellen sind keine geprüften Antworten auf deine Frage.
-    Prüfe die Aussage und ihren Zusammenhang im Originalkapitel.</p>
+    Prüfe die Aussage und ihren Zusammenhang in der Originalpublikation.</p>
     <p>Deine Frage wird lokal in deinem Browser verarbeitet und bleibt auf deinem Gerät.
     Beim ersten Besuch braucht die Seite eine Internetverbindung.
     Die erste Suche lädt ein Sprachmodell von etwa 120 MB herunter.
-    Die Links «Originalkapitel öffnen» führen über die DOI zur jeweiligen Publikation.</p>
-    <p>Alle Originalpublikationen findest du im
-    <a href="https://emono.unibas.ch/stadtgeschichtebasel/catalog">Publikationskatalog</a>.</p>
-    <p>Inhalte: © Stadt.Geschichte.Basel / Christoph Merian Verlag,
+    Die Links «Originalkapitel öffnen» führen über die DOI zur jeweiligen Publikation.
+    «Originalstory öffnen» führt zur Data Story auf ArcGIS StoryMaps.
+    «Nur Zusammenfassung» kennzeichnet Ergebnisse, die nur eine Beschreibung durchsuchen.</p>
+    <p>Die Buchreihe findest du im
+    <a href="https://emono.unibas.ch/stadtgeschichtebasel/catalog">Publikationskatalog</a>.
+    Die <a href="https://stadtgeschichtebasel.ch/data-stories">Data Stories</a> findest du im Portal.</p>
+    <p>Buchkapitel: © Stadt.Geschichte.Basel / Christoph Merian Verlag,
     <a href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</a>.
+    Die Erzähltexte der Data Stories sind mit Erlaubnis enthalten.
+    Für sie gelten die Rechtehinweise der jeweiligen Originalpublikation.
     Den <a href="https://github.com/Stadt-Geschichte-Basel/frag-mich-was">Quellcode</a>
     findest du auf GitHub. Die Software steht unter AGPL-3.0.</p>
     </details>

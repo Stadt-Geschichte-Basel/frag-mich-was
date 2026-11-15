@@ -15,6 +15,7 @@ from scripts.build_index import (
     MODEL,
     REFERENCE_EXPECTED_URL,
     REFERENCE_QUERY,
+    STORY_REFERENCES,
 )
 
 INDEX = load_index(INDEX_FILE.read_text(encoding="utf-8"))
@@ -66,3 +67,25 @@ def test_python_model_reproduces_the_fixture() -> None:
     vectors = encoder.encode(list(FIXTURE_SENTENCES), normalize_embeddings=True)
     for item, vector in zip(FIXTURE["sentences"], vectors, strict=True):
         assert math.sumprod(item["embedding"], [float(value) for value in vector]) > 0.999
+
+
+def test_all_seven_stories_have_full_text_and_canonical_links() -> None:
+    from scripts.import_data_stories import STORIES
+
+    stories = [chunk for chunk in INDEX.chunks if chunk.content_type == "data_story"]
+    assert {chunk.url for chunk in stories} == {story.url for story in STORIES}
+    assert len({chunk.source for chunk in stories}) == 7
+    assert all(chunk.title.endswith(" — Data Stories") for chunk in stories)
+    assert all(chunk.coverage == "full_text" for chunk in stories)
+    assert all("juedische-basel" not in chunk.source for chunk in INDEX.chunks)
+
+
+def test_story_queries_find_expected_publications() -> None:
+    references = FIXTURE["story_references"]
+    assert [
+        (item["query"], item["expected_url"].rsplit("/", 1)[-1]) for item in references
+    ] == list(STORY_REFERENCES)
+    for item in references:
+        check_vector(item["embedding"], MODEL.dimensions)
+        top = [chunk.url for chunk, _ in rank(item["embedding"], INDEX.chunks)]
+        assert item["expected_url"] in top, (item["query"], top)
