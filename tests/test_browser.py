@@ -71,7 +71,7 @@ def open_page(context: BrowserContext, hosts: set[str], errors: list[str]) -> Pa
 
 
 def search(page: Page, query: str) -> None:
-    field = page.get_by_role("textbox", name="Was möchtest du über Basels Geschichte wissen?")
+    field = page.get_by_role("textbox", name="Wonach suchst du in Basels Geschichte?")
     field.fill(query)
     field.press("Tab")
     button = page.get_by_role("button", name="Suchen")
@@ -92,17 +92,31 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
     page = open_page(context, hosts, errors)
     page.goto(site)
     page.get_by_text(
-        f"Du kannst alle {len({chunk.source[4:6] for chunk in INDEX.chunks if chunk.content_type == 'chapter'})} Forschungsbände"
+        f"{len({chunk.source[4:6] for chunk in INDEX.chunks if chunk.content_type == 'chapter'})} Forschungsbände"
     ).wait_for(timeout=LOAD_TIMEOUT)
     page.reload()
     page.get_by_text(
-        f"Du kannst alle {len({chunk.source[4:6] for chunk in INDEX.chunks if chunk.content_type == 'chapter'})} Forschungsbände"
+        f"{len({chunk.source[4:6] for chunk in INDEX.chunks if chunk.content_type == 'chapter'})} Forschungsbände"
     ).wait_for(timeout=LOAD_TIMEOUT)
 
     assert page.locator("html").get_attribute("lang") == "de-CH"
     assert page.locator('meta[name="theme-color"]').count() == 1
-    assert page.title() == "Frag mich was – Stadt.Geschichte.Basel"
+    assert page.title() == "Frag mich was – Semantische Suche | Stadt.Geschichte.Basel"
     assert page.locator('meta[name="description"]').count() == 1
+    assert "Semantische Suchmaschine" in (
+        page.locator('meta[name="description"]').get_attribute("content") or ""
+    )
+    assert page.locator('meta[property="og:title"]').get_attribute("content") == page.title()
+    assert page.locator('meta[property="og:description"]').get_attribute("content") == page.locator(
+        'meta[name="description"]'
+    ).get_attribute("content")
+    assert (
+        page.get_by_role("textbox", name="Wonach suchst du in Basels Geschichte?").get_attribute(
+            "placeholder"
+        )
+        == "Rhein und Handel in Basel"
+    )
+    assert page.get_by_text("Semantische Suchmaschine für Basels Geschichte.").is_visible()
     assert page.locator('link[rel="canonical"]').count() == 1
     assert page.locator('meta[property^="og:"]').count() == 7
     assert page.locator('meta[name="theme-color"]').get_attribute("content") == "#3a1e3e"
@@ -112,7 +126,7 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
         )
         == "600"
     )
-    assert page.get_by_role("status").filter(has_text="Du kannst").count() == 1
+    assert page.get_by_role("status").filter(has_text="Forschungsbände").count() == 1
     logo = page.get_by_role("img", name="Stadt.Geschichte.Basel")
     assert logo.evaluate("image => image.complete && image.naturalWidth > 0")
     assert (
@@ -147,8 +161,9 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
         == "public/sgb/favicon.png"
     )
 
+    assert page.get_by_text("Gib ein Thema oder eine Frage ein.", exact=False).count() == 0
     search(page, "   ")
-    page.get_by_text("Gib eine Frage oder ein Thema ein.").wait_for(timeout=LOAD_TIMEOUT)
+    page.get_by_text("Gib ein Thema oder eine Frage ein.").wait_for(timeout=LOAD_TIMEOUT)
     assert not any(host.endswith(ALLOWED_HOST_SUFFIXES) for host in hosts), "blank query"
 
     reference = FIXTURE["reference"]
@@ -167,7 +182,7 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
     result_box = result_link.bounding_box()
     assert result_box is not None and round(result_box["height"], 3) >= 24
     assert all("Ähnlichkeitswert" not in text for text in texts)
-    assert page.get_by_text("Die Suche zeigt passende Textstellen,", exact=False).is_visible()
+    assert page.get_by_text("Die Ergebnisse sind Textauszüge", exact=False).is_visible()
     expected = next(chunk for chunk in INDEX.chunks if chunk.url == reference["expected_url"])
     assert expected.url in items.locator("a").evaluate_all(
         "links => links.slice(0, 3).map(link => link.href)"
@@ -202,7 +217,7 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
     summary.focus()
     summary.press("Enter")
     assert summary.evaluate("el => getComputedStyle(el).outlineWidth") == "3px"
-    assert about.get_by_text("Deine Frage wird lokal", exact=False).is_visible()
+    assert about.get_by_text("Deine Eingabe wird lokal", exact=False).is_visible()
     assert about.get_by_role("link", name="Publikationskatalog").is_visible()
     assert about.get_by_role("link", name="CC BY-NC 4.0").is_visible()
     page.set_viewport_size({"width": 320, "height": 844})
@@ -231,7 +246,9 @@ def test_layout_reflows_at_320px_with_large_text(context: BrowserContext, site: 
     page = context.new_page()
     page.set_viewport_size({"width": 320, "height": 700})
     page.goto(site)
-    page.get_by_text("Du kannst alle", exact=False).wait_for(timeout=LOAD_TIMEOUT)
+    page.get_by_role("status").filter(has_text="Forschungsbände").wait_for(timeout=LOAD_TIMEOUT)
+    submit_box = page.get_by_role("button", name="Suchen").bounding_box()
+    assert submit_box is not None and submit_box["y"] + submit_box["height"] <= 700
     page.add_style_tag(
         content="html{font-size:200%!important}"
         "*{line-height:1.5!important;letter-spacing:.12em!important;word-spacing:.16em!important}"
@@ -258,7 +275,7 @@ def test_footer_ends_the_page(
     page = context.new_page()
     page.set_viewport_size({"width": width, "height": height})
     page.goto(site)
-    page.get_by_text("Du kannst alle", exact=False).wait_for(timeout=LOAD_TIMEOUT)
+    page.get_by_role("status").filter(has_text="Forschungsbände").wait_for(timeout=LOAD_TIMEOUT)
     if large_text:
         page.add_style_tag(
             content="html{font-size:200%!important}"
@@ -351,7 +368,7 @@ def test_model_failure_shows_retry(context: BrowserContext, site: str) -> None:
     page.route("https://huggingface.co/**", block)
     page.goto(site)
     page.get_by_text(
-        f"Du kannst alle {len({chunk.source[4:6] for chunk in INDEX.chunks if chunk.content_type == 'chapter'})} Forschungsbände"
+        f"{len({chunk.source[4:6] for chunk in INDEX.chunks if chunk.content_type == 'chapter'})} Forschungsbände"
     ).wait_for(timeout=LOAD_TIMEOUT)
     search(page, FIXTURE["reference"]["query"])
     page.get_by_text("Die Suche ist fehlgeschlagen.").wait_for(timeout=MODEL_TIMEOUT)
@@ -371,7 +388,7 @@ def test_story_search_end_to_end(context: BrowserContext, site: str, tmp_path: P
     page.goto(site)
     page.get_by_role("status").filter(has_text="und 7 Data Stories").wait_for(timeout=LOAD_TIMEOUT)
     reference = FIXTURE["story_references"][-1]
-    search(page, reference["query"])
+    search(page, "Digitalisierung der Einwohnerkontrolle in Basel")
     link = page.locator(f'ol.sgb-results a[href="{reference["expected_url"]}"]')
     link.wait_for(timeout=MODEL_TIMEOUT)
     assert (link.get_attribute("aria-label") or "").startswith("Originalstory öffnen:")

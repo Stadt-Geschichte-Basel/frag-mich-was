@@ -1,6 +1,11 @@
 # Frag mich was
 
-Frag mich was searches the research chapters and seven Data Stories of Stadt.Geschichte.Basel by meaning.
+**A semantic search engine for the research volumes and seven Data Stories of Stadt.Geschichte.Basel.**
+
+Search by topic or question to find passages with a related meaning.
+Results link to the original book chapters and Data Stories.
+The search retrieves existing passages. It does not generate or verify answers.
+
 The interface uses Swiss Standard German (de-CH).
 The corpus contains German-language chapters, including introductions. It excludes appendices.
 Source quotations keep their original spelling.
@@ -9,8 +14,9 @@ The application has no backend or inference API.
 
 ## Search
 
-Enter a question or topic, then select **Suchen**.
-For example: “Welche Bedeutung hatte der Rhein für Basel?”
+Enter a topic or question. Select **Suchen**.
+For example: “Rhein und Handel in Basel”.
+You can also ask: “Welche Bedeutung hatte der Rhein für Basel?”
 Related wording can also find relevant passages.
 
 Each result shows the publication title, its volume title, an excerpt, and a link to the original.

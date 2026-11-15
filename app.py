@@ -3,7 +3,7 @@ import marimo
 __generated_with = "0.25.2"
 app = marimo.App(
     width="medium",
-    app_title="Frag mich was – Stadt.Geschichte.Basel",
+    app_title="Frag mich was – Semantische Suche | Stadt.Geschichte.Basel",
     css_file="sgb.css",
     html_head_file="head.html",
 )
@@ -298,11 +298,9 @@ def _():
 
     # Frag mich was
 
-    **Fragen stellen. Geschichte finden.**
+    **Semantische Suchmaschine für Basels Geschichte.**
 
-    Finde Textstellen in den Forschungsbänden und Data Stories von Stadt.Geschichte.Basel.
-    Stelle eine Frage oder gib ein Thema ein.
-    Jede Textstelle führt zur Originalpublikation.
+    Finde passende Textstellen und öffne die Originalpublikationen.
     """)
     return
 
@@ -352,14 +350,11 @@ def _(index, index_error):
         )
     else:
         _volumes, _stories = corpus_counts(index.chunks)
-        _status = mo.callout(
-            mo.Html(
-                f'<p role="status">Du kannst alle {_volumes} '
-                '<a href="https://emono.unibas.ch/stadtgeschichtebasel/catalog">Forschungsbände</a> '
-                f'und {_stories} <a href="https://stadtgeschichtebasel.ch/data-stories">Data Stories</a> '
-                "von Stadt.Geschichte.Basel durchsuchen.</p>"
-            ),
-            kind="success",
+        _status = mo.Html(
+            f'<p class="sgb-corpus" role="status">{_volumes} '
+            '<a href="https://emono.unibas.ch/stadtgeschichtebasel/catalog">Forschungsbände</a> '
+            f'und {_stories} <a href="https://stadtgeschichtebasel.ch/data-stories">Data Stories</a> '
+            "durchsuchen.</p>"
         )
     _status
     return
@@ -369,17 +364,12 @@ def _(index, index_error):
 def _(index):
     mo.stop(index is None or not index.chunks)
     form = mo.ui.text(
-        label="Was möchtest du über Basels Geschichte wissen?",
-        placeholder="Welche Bedeutung hatte der Rhein für Basel?",
+        label="Wonach suchst du in Basels Geschichte?",
+        placeholder="Rhein und Handel in Basel",
         full_width=True,
     ).form(submit_button_label="Suchen", bordered=False)
     retry = mo.ui.run_button(label="Erneut versuchen")
-    mo.vstack(
-        [
-            form,
-            mo.md("Auch verwandte Begriffe können passende Textstellen finden."),
-        ]
-    )
+    form
     return form, retry
 
 
@@ -393,8 +383,12 @@ def _():
 @app.cell
 async def _(form, index, retry, session):
     retry.value  # A click on Retry runs this cell again.
+    mo.stop(form.value is None)
     _query = (form.value or "").strip()
-    mo.stop(not _query, mo.md("Gib eine Frage oder ein Thema ein. Wähle dann **Suchen**."))
+    mo.stop(
+        not _query,
+        mo.Html('<p role="status">Gib ein Thema oder eine Frage ein. Wähle dann «Suchen».</p>'),
+    )
     mo.stop(
         not IS_WASM,
         mo.callout(
@@ -426,8 +420,8 @@ async def _(form, index, retry, session):
         _output = mo.vstack(
             [
                 mo.md(
-                    "Die Suche zeigt passende Textstellen, keine automatisch generierten Antworten. "
-                    "Der Link führt zur Originalpublikation."
+                    "Die Ergebnisse sind Textauszüge aus den Originalpublikationen, "
+                    "keine generierten Antworten."
                 ),
                 mo.Html(render_results(rank(_vector, index.chunks))),
             ]
@@ -454,16 +448,16 @@ def _():
     mo.Html("""
     <details class="sgb-about">
     <summary>Über die Suche</summary>
-    <p>Frag mich was ist ein Suchangebot des Projekts Stadt.Geschichte.Basel.
-    Es erschliesst die Kapitel der Buchreihe von Stadt.Geschichte.Basel / Christoph Merian Verlag,
-    einschliesslich der Einleitungen. Die Anhänge mit Verzeichnissen sind nicht enthalten.
-    Dazu kommen die Erzähltexte von sieben Data Stories. «Das jüdische Basel» ist nicht enthalten.
+    <p>Frag mich was ist eine semantische Suchmaschine für die Forschungsbände
+    von Stadt.Geschichte.Basel / Christoph Merian Verlag und sieben Data Stories.
+    Sie durchsucht die Kapitel einschliesslich der Einleitungen sowie die Erzähltexte
+    der Data Stories. Die Anhänge mit Verzeichnissen und «Das jüdische Basel» sind nicht enthalten.
     Alle Data Stories tragen den gemeinsamen Bandtitel «Data Stories».</p>
-    <p>Die semantische Suche vergleicht die Bedeutung deiner Frage mit den Textstellen.
+    <p>Die Suche vergleicht die Bedeutung deiner Eingabe mit den Textstellen.
     Die Reihenfolge beruht auf sprachlicher Ähnlichkeit. Die Suche kann wichtige Stellen übersehen
-    oder unpassende Stellen anzeigen. Die Textstellen sind keine geprüften Antworten auf deine Frage.
+    oder unpassende Stellen anzeigen. Die Textstellen sind keine geprüften Antworten auf deine Eingabe.
     Prüfe die Aussage und ihren Zusammenhang in der Originalpublikation.</p>
-    <p>Deine Frage wird lokal in deinem Browser verarbeitet und bleibt auf deinem Gerät.
+    <p>Deine Eingabe wird lokal in deinem Browser verarbeitet und bleibt auf deinem Gerät.
     Beim ersten Besuch braucht die Seite eine Internetverbindung.
     Die erste Suche lädt ein Sprachmodell von etwa 120 MB herunter.
     Die Links «Originalkapitel öffnen» führen über die DOI zur jeweiligen Publikation.
