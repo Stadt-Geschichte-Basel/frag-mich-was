@@ -1,6 +1,11 @@
 # Frag mich was
 
-Frag mich was searches the research chapters and seven Data Stories of Stadt.Geschichte.Basel by meaning.
+**A semantic search engine for the research volumes and seven Data Stories of Stadt.Geschichte.Basel.**
+
+Search by topic or question to find passages based on meaning rather than exact keyword matches.
+Results link to the original book chapters and Data Stories.
+This is a search engine, not a chatbot: it retrieves existing passages instead of generating or verifying answers.
+
 The interface uses Swiss Standard German (de-CH).
 The corpus contains German-language chapters, including introductions. It excludes appendices.
 Source quotations keep their original spelling.
