@@ -51,6 +51,9 @@ Other commands:
 uv run --group index python -m scripts.build_index          # Build the index and the fixture.
 uv run python -m scripts.export_site    # Export the site.
 uv run pytest -m browser --no-cov                           # Browser tests. They need dist/ and a network.
+uv run marimo edit compare.py                               # Compare the search modes. It runs locally. It does not ship.
+uv run --group index marimo edit compare.py                 # Add free queries to the comparison.
+uv run python -m scripts.compare_modes                      # Print the reference table.
 ```
 
 ## 4. GitHub Workflow

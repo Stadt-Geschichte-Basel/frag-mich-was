@@ -12,6 +12,7 @@ import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from app import ModelInfo, load_index
 
@@ -251,19 +252,36 @@ def serialize_index(model: ModelInfo, chunks: Sequence[Mapping[str, object]]) ->
     return f'{{"schema_version":1,\n"model":{head},\n"chunks":[\n{lines}\n]}}\n'
 
 
-def main() -> None:  # pragma: no cover - needs the embedding model; tests read its committed output
-    """Chunk and embed the content. Validate the index. Then write the index and the fixture."""
+def load_encoder() -> Any:  # pragma: no cover - needs the index dependency group
+    """Load the pinned document model on the CPU."""
     # The index dependency group holds this package. The default environment does not.
-    encoder = importlib.import_module("sentence_transformers").SentenceTransformer(
+    return importlib.import_module("sentence_transformers").SentenceTransformer(
         MODEL.document_model, revision=MODEL.document_revision, device="cpu"
     )
 
+
+def embed(encoder: Any, texts: Sequence[str]) -> list[list[float]]:
+    """Encode each text to a normalized vector. Round each value to ``DECIMALS`` places.
+
+    The caller adds the E5 prefix: ``MODEL.query_prefix`` for a query, ``MODEL.document_prefix``
+    for a passage.
+
+    >>> class Encoder:
+    ...     def encode(self, texts, normalize_embeddings, batch_size):
+    ...         return [[0.123456789, 1.0] for _ in texts]
+    >>> embed(Encoder(), ["query: a"])
+    [[0.12346, 1.0]]
+    """
+    vectors = encoder.encode(list(texts), normalize_embeddings=True, batch_size=32)
+    return [[round(float(value), DECIMALS) for value in vector] for vector in vectors]
+
+
+def main() -> None:  # pragma: no cover - needs the embedding model; tests read its committed output
+    """Chunk and embed the content. Validate the index. Then write the index and the fixture."""
+    encoder = load_encoder()
+
     def count_tokens(text: str) -> int:
         return len(encoder.tokenizer.encode(text, add_special_tokens=False))
-
-    def embed(texts: Sequence[str]) -> list[list[float]]:
-        vectors = encoder.encode(list(texts), normalize_embeddings=True, batch_size=32)
-        return [[round(float(value), DECIMALS) for value in vector] for vector in vectors]
 
     paths = sorted(p for p in CONTENT_DIR.iterdir() if p.suffix in {".md", ".txt"})
     documents = [parse_document(path.name, path.read_text(encoding="utf-8")) for path in paths]
@@ -277,7 +295,7 @@ def main() -> None:  # pragma: no cover - needs the embedding model; tests read 
     if too_long:
         raise SystemExit(f"Passages exceed the model input length: {too_long}")
 
-    vectors = embed([f"{MODEL.document_prefix}{chunk['text']}" for chunk in chunks])
+    vectors = embed(encoder, [f"{MODEL.document_prefix}{chunk['text']}" for chunk in chunks])
     for chunk, vector in zip(chunks, vectors, strict=True):
         chunk["embedding"] = vector
     text = serialize_index(MODEL, chunks)
@@ -289,7 +307,9 @@ def main() -> None:  # pragma: no cover - needs the embedding model; tests read 
         "model": MODEL.model_dump(),
         "sentences": [
             {"text": sentence, "embedding": vector}
-            for sentence, vector in zip(FIXTURE_SENTENCES, embed(FIXTURE_SENTENCES), strict=True)
+            for sentence, vector in zip(
+                FIXTURE_SENTENCES, embed(encoder, FIXTURE_SENTENCES), strict=True
+            )
         ],
         "story_references": [
             {
@@ -299,14 +319,14 @@ def main() -> None:  # pragma: no cover - needs the embedding model; tests read 
             }
             for (query, item_id), vector in zip(
                 STORY_REFERENCES,
-                embed([MODEL.query_prefix + query for query, _ in STORY_REFERENCES]),
+                embed(encoder, [MODEL.query_prefix + query for query, _ in STORY_REFERENCES]),
                 strict=True,
             )
         ],
         "reference": {
             "query": REFERENCE_QUERY,
             "expected_url": REFERENCE_EXPECTED_URL,
-            "embedding": embed([MODEL.query_prefix + REFERENCE_QUERY])[0],
+            "embedding": embed(encoder, [MODEL.query_prefix + REFERENCE_QUERY])[0],
         },
     }
     FIXTURE_FILE.parent.mkdir(parents=True, exist_ok=True)

@@ -41,6 +41,7 @@ ignore = ["E501"]
 [tool.ruff.lint.per-file-ignores]
 # A marimo cell shows its last expression.
 "app.py" = ["B018"]
+"compare.py" = ["B018"]
 
 [tool.pytest.ini_options]
 addopts = "--doctest-modules --cov --cov-fail-under=100 -m 'not browser'"

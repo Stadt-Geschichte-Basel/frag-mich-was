@@ -101,6 +101,29 @@ The plan allows three seconds to build the index and 200 milliseconds for one qu
 The index build and the queries start no thread. Pyodide recorded no `threading.Thread.start` call in either browser.
 A test checks this natively.
 
+## Compare the search modes
+
+The notebook `compare.py` ranks each query in all three modes. It runs on your machine. The published site does not include it.
+
+```bash
+uv run marimo edit compare.py                 # The reference queries.
+uv run --group index marimo edit compare.py   # Adds free queries. This loads the Python model.
+uv run python -m scripts.compare_modes        # Prints the reference table in a terminal.
+```
+
+The notebook shows:
+
+- The rank of the expected publication for each reference query in each mode. A tick marks a rank in the top three.
+- For one query, the rank in each mode of every publication that any mode shows.
+- The number of publications that the lexical mode matches, how many publications the combined top five shares with the other two modes, and how many combined excerpts come from a lexical passage.
+- The result lists of the three modes side by side.
+
+`scripts/compare_modes.py` holds the logic. `tests/test_compare.py` checks it, and checks that it ranks like the page.
+A free query uses the build code to embed the query with the Python model. The browser model gives nearly the same vector. A test compares the Python vector with the reference fixture.
+
+On the eight reference queries, the expected publication ranks in the top three for **Semantisch** in 7 queries, **Lexikalisch** in 7, and **Kombiniert** in 8.
+The reference queries are questions with distinctive words. They do not show how the modes behave on other queries.
+
 ## Set up
 
 ```bash
