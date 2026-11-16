@@ -25,9 +25,9 @@ It is a native select list. It keeps its label and its keyboard behaviour. Tab r
 
 | Mode | What it does | Needs the model |
 | --- | --- | --- |
-| **Kombiniert** (default) | Combines the lexical and the semantic ranking. | Yes. Without the model, it shows lexical results and a notice. |
+| **Semantisch** (default) | Compares the meaning of the query with the passages. | Yes. Without the model, it shows an error and a hint about the lexical mode. |
 | **Lexikalisch** | Finds words, names, and dates as the texts spell them. It does not stem words. | No |
-| **Semantisch** | Compares the meaning of the query with the passages. | Yes. Without the model, it shows an error and a hint about the lexical mode. |
+| **Kombiniert** | Combines the lexical and the semantic ranking. | Yes. Without the model, it shows lexical results and a notice. |
 
 A mode change keeps the submitted query. The interface reuses the vector of the last successful query.
 The text field does not take part in a mode change. Select **Suchen** to submit a new query.

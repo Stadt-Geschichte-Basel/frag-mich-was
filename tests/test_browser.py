@@ -148,7 +148,7 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
     mode = page.get_by_role("combobox", name="Suchmodus")
     assert mode.is_visible()
     assert mode.locator("option").all_inner_texts() == ["Kombiniert", "Lexikalisch", "Semantisch"]
-    expect(mode).to_have_value("Kombiniert")
+    expect(mode).to_have_value("Semantisch")
     assert page.locator('link[rel="canonical"]').count() == 1
     assert page.locator('meta[property^="og:"]').count() == 7
     assert page.locator('meta[name="theme-color"]').get_attribute("content") == "#3a1e3e"
@@ -434,7 +434,8 @@ def test_model_failure_shows_retry(context: BrowserContext, site: str) -> None:
     page.get_by_text(
         f"{len({chunk.source[4:6] for chunk in INDEX.chunks if chunk.content_type == 'chapter'})} Forschungsbände"
     ).wait_for(timeout=LOAD_TIMEOUT)
-    choose_mode(page, "Semantisch")
+    # The default mode is Semantisch. A failed model download is an error there.
+    expect(page.get_by_role("combobox", name="Suchmodus")).to_have_value("Semantisch")
     search(page, FIXTURE["reference"]["query"])
     page.get_by_text("Die Suche ist fehlgeschlagen.").wait_for(timeout=MODEL_TIMEOUT)
     assert page.get_by_text("Die lexikalische Suche braucht das Sprachmodell nicht.").is_visible()

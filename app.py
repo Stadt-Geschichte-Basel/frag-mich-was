@@ -52,6 +52,8 @@ with app.setup:
         "Lexikalisch": "lexical",
         "Semantisch": "semantic",
     }
+    # The mode that a new visit shows. It is a key of MODES.
+    DEFAULT_MODE_LABEL = "Semantisch"
     NORM_TOLERANCE = 0.01
     APPROVED_URL_HOSTS = frozenset({"doi.org"})
     IS_WASM = sys.platform == "emscripten"
@@ -555,7 +557,7 @@ def _(index):
     # query that the form last submitted.
     # A native select keeps its label, its focus, and its keyboard behaviour. The radio of marimo
     # names its group "Radio Group" and does not keep the focus on the checked option.
-    mode = mo.ui.dropdown(options=MODES, value="Kombiniert", label="Suchmodus")
+    mode = mo.ui.dropdown(options=MODES, value=DEFAULT_MODE_LABEL, label="Suchmodus")
     mode
     return (mode,)
 
@@ -675,11 +677,11 @@ def _():
     der Data Stories. Die Anhänge mit Verzeichnissen und «Das jüdische Basel» sind nicht enthalten.
     Alle Data Stories tragen den gemeinsamen Bandtitel «Data Stories».</p>
     <p>Du kannst unter «Suchmodus» zwischen drei Modi wählen.
-    «Kombiniert» ist voreingestellt. Dieser Modus führt die lexikalische und die semantische Suche zusammen.
+    «Semantisch» ist voreingestellt. Dieser Modus vergleicht die Bedeutung deiner Eingabe mit den Textstellen.
+    Die Reihenfolge beruht dann auf sprachlicher Ähnlichkeit.
     «Lexikalisch» findet Wörter, Namen und Jahreszahlen so, wie sie in den Texten stehen.
     Er findet nur ganze Wörter in derselben Form und braucht kein Sprachmodell.
-    «Semantisch» vergleicht die Bedeutung deiner Eingabe mit den Textstellen.
-    Die Reihenfolge beruht dann auf sprachlicher Ähnlichkeit.
+    «Kombiniert» führt die semantische und die lexikalische Suche zusammen.
     Wenn du den Modus wechselst, bleibt deine Eingabe erhalten.</p>
     <p>Die Suche kann wichtige Stellen übersehen oder unpassende Stellen anzeigen.
     Die Textstellen sind keine geprüften Antworten auf deine Eingabe.

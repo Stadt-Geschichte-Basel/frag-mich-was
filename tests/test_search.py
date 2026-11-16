@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from app import (
+    DEFAULT_MODE_LABEL,
     MODES,
     RRF_K,
     TOP_K,
@@ -194,6 +195,7 @@ def test_search_modes() -> None:
     ]
     index = build_lexical_index(chunks)
     assert MODES == {"Kombiniert": "combined", "Lexikalisch": "lexical", "Semantisch": "semantic"}
+    assert MODES[DEFAULT_MODE_LABEL] == "semantic"
     assert ids(search("lexical", "Fischerei", None, index)) == ["a"]
     assert ids(search("lexical", "unbekannt", [1.0], index)) == []
     assert ids(search("semantic", "Fischerei", [1.0], index)) == ["a", "b"]
