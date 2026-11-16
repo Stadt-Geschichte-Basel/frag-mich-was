@@ -1,8 +1,9 @@
 # Frag mich was
 
-**A semantic search engine for the research volumes and seven Data Stories of Stadt.Geschichte.Basel.**
+**A lexical and semantic search engine for the research volumes and seven Data Stories of Stadt.Geschichte.Basel.**
 
-Search by topic or question to find passages with a related meaning.
+Search by word, name, date, topic, or question.
+The search finds passages with the same words or with a related meaning.
 Results link to the original book chapters and Data Stories.
 The search retrieves existing passages. It does not generate or verify answers.
 
@@ -19,6 +20,18 @@ For example: “Rhein und Handel in Basel”.
 You can also ask: “Welche Bedeutung hatte der Rhein für Basel?”
 Related wording can also find relevant passages.
 
+Select a search mode with **Suchmodus**. The control sits below the search form.
+
+| Mode | What it does | Needs the model |
+| --- | --- | --- |
+| **Kombiniert** (default) | Combines the lexical and the semantic ranking. | Yes. Without the model, it shows lexical results and a notice. |
+| **Lexikalisch** | Finds words, names, and dates as the texts spell them. It does not stem words. | No |
+| **Semantisch** | Compares the meaning of the query with the passages. | Yes. Without the model, it shows an error and a hint about the lexical mode. |
+
+A mode change keeps the submitted query. The interface reuses the vector of the last successful query.
+The text field does not take part in a mode change. Select **Suchen** to submit a new query.
+The lexical mode starts no model import and no model download.
+
 Each result shows the publication title, its volume title, an excerpt, and a link to the original.
 Chapter links show **Originalkapitel öffnen** and use the DOI.
 Story links show **Originalstory öffnen** and open ArcGIS StoryMaps.
@@ -26,8 +39,8 @@ All stories use **Data Stories** as their shared volume title.
 The page shows up to five distinct publications in one ranking.
 A **Nur Zusammenfassung** label marks records that contain only a description.
 The seven current story records contain full narrative text.
-Results are excerpts ranked by similarity, not generated or verified answers.
-The interface does not show numeric similarity scores.
+Results are excerpts, not generated or verified answers.
+The interface does not show numeric scores.
 
 **Über die Suche** contains source, publisher, search limitation, privacy, licence, catalog, and source-code information.
 The disclosure sits below the search results.
@@ -39,8 +52,13 @@ The disclosure sits below the search results.
 3. The builder calculates normalized embeddings with the pinned multilingual model.
 4. The builder writes passages and embeddings to `public/embeddings.json`.
 5. The browser loads and validates the index.
-6. A quantized ONNX model calculates the query embedding in the browser.
-7. Python ranks passages by cosine similarity and keeps each publication's best passage.
+6. The browser builds one BM25 index from the title and text of each passage. It uses `bm25s`, German stopwords, and no stemming. Titles, passages, and queries use the same tokenizer.
+7. In the modes **Kombiniert** and **Semantisch**, a quantized ONNX model calculates the query embedding in the browser.
+8. Python ranks the passages. Cosine similarity gives the semantic ranking. BM25 gives the lexical ranking. Each ranking keeps each publication's best passage. A publication is `chunk.url or chunk.id`.
+9. **Kombiniert** fuses the two complete publication rankings with Reciprocal Rank Fusion. A publication scores `sum(1 / (60 + rank))` with ranks from 1. A publication in one ranking stays in the result. The passage comes from the ranking with the better rank. The semantic passage wins a tie. A score tie breaks by passage ID. The page then shows the top five.
+
+The lexical ranking skips passages with a BM25 score of zero or less.
+An empty, stopword-only, or unknown query has no lexical match.
 
 The query stays in the browser. No inference service receives it.
 All corpus text and embeddings are public. Do not add confidential or restricted text.
@@ -51,6 +69,7 @@ The first search also downloads a model of about 120 MB.
 The first visit needs a network connection.
 The application does not promise complete offline operation.
 
+The browser installs `bm25s` from PyPI. The export reads the pin `bm25s==0.3.16` from the PEP 723 header of `app.py`. Keep it equal to the pin in `pyproject.toml`. A test checks this.
 Runtime and model downloads use `cdn.jsdelivr.net`, `files.pythonhosted.org`, `pypi.org`, `wasm.marimo.app`, and Hugging Face file hosts.
 Branding assets load from this site's `public/sgb/` directory.
 
@@ -65,6 +84,21 @@ Branding assets load from this site's `public/sgb/` directory.
 The index records immutable model revisions, 384 dimensions, normalization, and the E5 prefixes.
 The page reads the query model from the index.
 The native embedding dependencies stay in the `index` dependency group.
+
+## Lexical search measurements
+
+The development machine measured `bm25s` 0.3.16 on the 6,660 passages of the committed index.
+The browser rows run a probe notebook with the committed index in Pyodide. They exclude the wheel download.
+The plan allows three seconds to build the index and 200 milliseconds for one query.
+
+| Environment | Import | Tokenize and index | One query |
+| --- | --- | --- | --- |
+| Native Python 3.13 | 0.56 s | 0.23 s | 0.15 ms |
+| Chromium, Pyodide | 0.16 s | 0.37 s | 0.6 ms |
+| Firefox, Pyodide | 0.18 s | 0.44 s | 1.0 ms |
+
+The index build and the queries start no thread. Pyodide recorded no `threading.Thread.start` call in either browser.
+A test checks this natively.
 
 ## Set up
 
@@ -188,6 +222,9 @@ uv run pytest -m browser --no-cov
 ```
 
 The checks cover keyboard search, retry, publication links, status roles, accessible names, and focus styles.
+They cover the mode control, query retention across mode changes, and keyboard access to the modes.
+They block the model downloads. They verify that the lexical mode makes no model request and that the combined mode falls back to lexical results.
+They also verify that the retry button recovers.
 They verify story retrieval and the shared Data Stories volume title.
 They also cover 320-pixel reflow, doubled root text size, and increased text spacing.
 The text-size check approximates text-only zoom. It does not reproduce browser zoom exactly.

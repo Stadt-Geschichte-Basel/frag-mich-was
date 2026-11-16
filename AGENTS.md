@@ -1,6 +1,6 @@
 # Agents Tooling Specification — Frag mich was
 
-This repository is a static semantic search page for the chapters of Stadt.Geschichte.Basel. It is a marimo WebAssembly notebook on GitHub Pages.
+This repository is a static lexical and semantic search page for the chapters of Stadt.Geschichte.Basel. It is a marimo WebAssembly notebook on GitHub Pages.
 
 It follows the shared Python specification, `10-AGENTS.python.md`. `README.md` describes the current application and workflow.
 Sections 1, 3, and 6 name only the tools that this repository uses.
@@ -12,7 +12,7 @@ Pin versions in `pyproject.toml`. Commit `uv.lock`. Install with `uv sync --lock
 
 **Development.** [uv](https://docs.astral.sh/uv/) dependencies, environments, and the lockfile · [ruff](https://docs.astral.sh/ruff/) lint and format · [ty](https://docs.astral.sh/ty/) types, pinned exactly while it stays in beta · [pytest](https://docs.pytest.org/) with [pytest-cov](https://pytest-cov.readthedocs.io/) tests, doctests, and coverage · [Playwright](https://playwright.dev/python/) browser tests.
 
-**Runtime.** [Pydantic](https://pydantic.dev/) v2 validation · [marimo](https://docs.marimo.io/) reactive notebook, exported with `html-wasm`.
+**Runtime.** [Pydantic](https://pydantic.dev/) v2 validation · [marimo](https://docs.marimo.io/) reactive notebook, exported with `html-wasm` · [bm25s](https://github.com/xhluca/bm25s) BM25 lexical ranking, pure Python with NumPy.
 
 **Index build.** [sentence-transformers](https://sbert.net/) in the `index` dependency group. The default environment and CI do not install this group.
 
@@ -79,6 +79,7 @@ Follow [secure use of Actions](https://docs.github.com/en/actions/reference/secu
 `app.py` runs in a browser with Pyodide.
 
 * Ship pure Python, or a verified Pyodide or PyPI WASM wheel. Never ship a development tool.
+* Pin each PyPI dependency of `app.py` in its PEP 723 header. The `html-wasm` export reads the header, not `pyproject.toml`. Keep both pins equal. A test checks `bm25s`.
 * Do not use an OS socket, a subprocess, or a thread.
 * Use `pyodide.http.pyfetch` for HTTP.
 * Keep JavaScript to the `EMBEDDER_JS` constant. Pass each value as an argument. Never put a value into JavaScript source.

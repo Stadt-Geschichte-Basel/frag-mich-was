@@ -1,11 +1,12 @@
 [project]
 name = "frag-mich-was"
 version = "0.1.0"
-description = "Static semantic search for Stadt.Geschichte.Basel with marimo WASM on GitHub Pages."
+description = "Static lexical and semantic search for Stadt.Geschichte.Basel with marimo WASM on GitHub Pages."
 readme = "README.md"
 license = "AGPL-3.0-only"
 requires-python = ">=3.12"
 dependencies = [
+    "bm25s==0.3.16",
     "marimo==0.25.2",
     "pydantic==2.14.3",
 ]

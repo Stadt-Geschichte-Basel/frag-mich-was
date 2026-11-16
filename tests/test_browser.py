@@ -10,6 +10,7 @@ These tests need the export in ``dist/``, the Playwright browsers, and network a
 import json
 import math
 import threading
+import time
 from collections.abc import Iterator
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -17,7 +18,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
-from playwright.sync_api import BrowserContext, Page, Route, sync_playwright
+from playwright.sync_api import BrowserContext, Page, Route, expect, sync_playwright
 
 from app import EMBEDDER_JS, QUERY_DTYPE, TRANSFORMERS_JS_URL, load_index
 
@@ -80,6 +81,31 @@ def search(page: Page, query: str) -> None:
     button.press("Enter")
 
 
+def choose_mode(page: Page, label: str) -> None:
+    """Select a search mode with the pointer and wait until the control shows it."""
+    radio = page.get_by_role("radio", name=label)
+    radio.click()
+    expect(radio).to_be_checked()
+
+
+def is_model_request(url: str) -> bool:
+    """A request for the model runtime or the model files."""
+    host = urlsplit(url).hostname or ""
+    return host.endswith(ALLOWED_HOST_SUFFIXES) or "@huggingface/transformers" in url
+
+
+def result_links(page: Page) -> list[str]:
+    return page.locator("ol.sgb-results a").evaluate_all("links => links.map(link => link.href)")
+
+
+def wait_for_links(page: Page, expected: list[str], timeout: float = 15.0) -> None:
+    """Wait until the results show the expected links. Marimo replaces the output a little later."""
+    deadline = time.monotonic() + timeout
+    while (links := result_links(page)) != expected:
+        assert time.monotonic() < deadline, f"{links} is not {expected}"
+        page.wait_for_timeout(200)
+
+
 def is_allowed(host: str) -> bool:
     local = host in {"", "localhost", "127.0.0.1"}
     return local or host in ALLOWED_HOSTS or host.endswith(ALLOWED_HOST_SUFFIXES)
@@ -103,7 +129,7 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
     assert page.locator('meta[name="theme-color"]').count() == 1
     assert page.title() == "Frag mich was – Semantische Suche | Stadt.Geschichte.Basel"
     assert page.locator('meta[name="description"]').count() == 1
-    assert "Semantische Suchmaschine" in (
+    assert "Lexikalische und semantische Suche" in (
         page.locator('meta[name="description"]').get_attribute("content") or ""
     )
     assert page.locator('meta[property="og:title"]').get_attribute("content") == page.title()
@@ -116,7 +142,16 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
         )
         == "Rhein und Handel in Basel"
     )
-    assert page.get_by_text("Semantische Suchmaschine für Basels Geschichte.").is_visible()
+    assert page.get_by_text(
+        "Lexikalische und semantische Suche für Basels Geschichte."
+    ).is_visible()
+    assert page.get_by_role("group", name="Suchmodus").is_visible()
+    assert [radio.get_attribute("value") for radio in page.get_by_role("radio").all()] == [
+        "Kombiniert",
+        "Lexikalisch",
+        "Semantisch",
+    ]
+    expect(page.get_by_role("radio", name="Kombiniert")).to_be_checked()
     assert page.locator('link[rel="canonical"]').count() == 1
     assert page.locator('meta[property^="og:"]').count() == 7
     assert page.locator('meta[name="theme-color"]').get_attribute("content") == "#3a1e3e"
@@ -254,15 +289,70 @@ def test_layout_reflows_at_320px_with_large_text(context: BrowserContext, site: 
         "*{line-height:1.5!important;letter-spacing:.12em!important;word-spacing:.16em!important}"
         "p{margin-bottom:2em!important}"
     )
+    page.locator("details").wait_for(timeout=LOAD_TIMEOUT)
     page.evaluate("document.querySelector('details').open = true")
-    clipped = page.evaluate(
-        """() => [...document.querySelectorAll('body *')]
+    clipped_script = """() => [...document.querySelectorAll('body *')]
         .filter(e => getComputedStyle(e).position !== 'fixed'
             && e.getBoundingClientRect().width > 0
             && e.getBoundingClientRect().right > innerWidth + 1)
         .map(e => e.tagName + ' ' + (e.textContent || '').slice(0, 30))"""
+    assert page.get_by_role("group", name="Suchmodus").is_visible()
+    assert page.evaluate(clipped_script) == []
+    # The lexical mode needs no model, so the results show at once.
+    choose_mode(page, "Lexikalisch")
+    search(page, "Merian")
+    page.locator("ol.sgb-results li").first.wait_for(timeout=LOAD_TIMEOUT)
+    assert page.evaluate(clipped_script) == []
+    page.close()
+
+
+def test_mode_control_works_with_the_keyboard(context: BrowserContext, site: str) -> None:
+    """Tab reaches the options. Arrow keys change the mode. The lexical search needs no model."""
+    errors: list[str] = []
+    page = open_page(context, set(), errors)
+    page.goto(site)
+    page.get_by_role("status").filter(has_text="Forschungsbände").wait_for(timeout=LOAD_TIMEOUT)
+    assert page.get_by_role("group", name="Suchmodus").locator("legend").inner_text() == "Suchmodus"
+    for label in ("Kombiniert", "Lexikalisch", "Semantisch"):
+        assert page.get_by_role("radio", name=label).is_visible()
+    radios = page.get_by_role("radio")
+    assert all(
+        (box := radio.bounding_box()) is not None and box["width"] >= 16 for radio in radios.all()
     )
-    assert clipped == []
+    page.get_by_role("button", name="Suchen").focus()
+    page.keyboard.press("Tab")
+    assert page.evaluate(
+        """() => {
+        let node = document.activeElement;
+        while (node?.shadowRoot?.activeElement) node = node.shadowRoot.activeElement;
+        return node?.getAttribute('role') === 'radio';
+    }"""
+    )
+    target = page.get_by_role("radio", name="Lexikalisch")
+    for _ in range(3):
+        if target.is_checked():
+            break
+        page.keyboard.press("ArrowDown")
+        page.wait_for_timeout(500)
+    expect(target).to_be_checked()
+    assert (
+        page.evaluate(
+            """() => {
+        let node = document.activeElement;
+        while (node?.shadowRoot?.activeElement) node = node.shadowRoot.activeElement;
+        return getComputedStyle(node).outlineWidth;
+    }"""
+        )
+        == "3px"
+    )
+    search(page, "1501")
+    page.locator("ol.sgb-results li").first.wait_for(timeout=LOAD_TIMEOUT)
+    texts = [" ".join(text.split()) for text in page.locator("ol.sgb-results li").all_inner_texts()]
+    assert 1 <= len(texts) <= 5
+    assert all("1501" in text for text in texts)
+    assert len(set(result_links(page))) == len(texts)
+    assert not errors
+    page.close()
 
 
 @pytest.mark.parametrize(
@@ -276,6 +366,7 @@ def test_footer_ends_the_page(
     page.set_viewport_size({"width": width, "height": height})
     page.goto(site)
     page.get_by_role("status").filter(has_text="Forschungsbände").wait_for(timeout=LOAD_TIMEOUT)
+    page.locator(".sgb-footer").wait_for(timeout=LOAD_TIMEOUT)
     if large_text:
         page.add_style_tag(
             content="html{font-size:200%!important}"
@@ -370,8 +461,10 @@ def test_model_failure_shows_retry(context: BrowserContext, site: str) -> None:
     page.get_by_text(
         f"{len({chunk.source[4:6] for chunk in INDEX.chunks if chunk.content_type == 'chapter'})} Forschungsbände"
     ).wait_for(timeout=LOAD_TIMEOUT)
+    choose_mode(page, "Semantisch")
     search(page, FIXTURE["reference"]["query"])
     page.get_by_text("Die Suche ist fehlgeschlagen.").wait_for(timeout=MODEL_TIMEOUT)
+    assert page.get_by_text("Die lexikalische Suche braucht das Sprachmodell nicht.").is_visible()
     assert page.locator("ol li").count() == 0
 
     page.unroute("https://huggingface.co/**", block)
@@ -407,3 +500,75 @@ def test_story_search_end_to_end(context: BrowserContext, site: str, tmp_path: P
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         result.screenshot(path=str(tmp_path / f"story-result-{width}.png"))
     page.close()
+
+
+def test_modes_keep_the_query_and_work_without_the_model(
+    context: BrowserContext, site: str
+) -> None:
+    """The lexical mode needs no model. The combined mode falls back. A retry recovers."""
+    assert context.browser is not None
+    fresh = context.browser.new_context()  # An empty cache, so that the model must download.
+    errors: list[str] = []
+    page = open_page(fresh, set(), errors)
+    model_requests: list[str] = []
+    page.on("request", lambda request: model_requests.append(request.url))
+
+    def block(route: Route) -> None:
+        route.abort()
+
+    page.route("https://huggingface.co/**", block)
+    page.goto(site)
+    page.get_by_role("status").filter(has_text="Forschungsbände").wait_for(timeout=LOAD_TIMEOUT)
+    field = page.get_by_role("textbox", name="Wonach suchst du in Basels Geschichte?")
+    notice = page.get_by_text("Das Sprachmodell ist nicht verfügbar.")
+    failure = page.get_by_text("Die Suche ist fehlgeschlagen.")
+
+    # Lexical mode: results without any model request.
+    choose_mode(page, "Lexikalisch")
+    search(page, "Merian")
+    page.locator("ol.sgb-results li").first.wait_for(timeout=LOAD_TIMEOUT)
+    lexical_links = result_links(page)
+    assert 1 <= len(lexical_links) == len(set(lexical_links)) <= 5
+    assert not [url for url in model_requests if is_model_request(url)]
+    assert notice.count() == failure.count() == 0
+
+    # Combined mode with the model blocked: lexical results, a short notice, and a retry button.
+    choose_mode(page, "Kombiniert")
+    notice.wait_for(timeout=MODEL_TIMEOUT)
+    assert field.input_value() == "Merian"
+    assert result_links(page) == lexical_links
+    assert (
+        page.get_by_role("status").filter(has_text="Das Sprachmodell ist nicht verfügbar").count()
+    )
+    assert page.get_by_role("button", name="Erneut versuchen").is_visible()
+
+    # Semantic mode with the model blocked: the error, a hint about the lexical mode, and a retry.
+    choose_mode(page, "Semantisch")
+    failure.wait_for(timeout=MODEL_TIMEOUT)
+    assert notice.count() == 0
+    assert field.input_value() == "Merian"
+    assert page.get_by_text("Die lexikalische Suche braucht das Sprachmodell nicht.").is_visible()
+    assert page.locator("ol.sgb-results").count() == 0
+    assert page.get_by_role("alert").filter(has_text="Die Suche ist fehlgeschlagen.").count() == 1
+
+    # The retry button recovers once the model loads.
+    page.unroute("https://huggingface.co/**", block)
+    page.get_by_role("button", name="Erneut versuchen").press("Enter")
+    page.locator("ol.sgb-results li").first.wait_for(timeout=MODEL_TIMEOUT)
+    assert failure.count() == 0
+    assert field.input_value() == "Merian"
+    assert any(is_model_request(url) for url in model_requests)
+
+    # Back in combined mode: no notice, and results for the same query.
+    choose_mode(page, "Kombiniert")
+    notice.wait_for(state="detached", timeout=MODEL_TIMEOUT)
+    page.locator("ol.sgb-results li").first.wait_for(timeout=MODEL_TIMEOUT)
+    assert field.input_value() == "Merian"
+    assert 1 <= len(result_links(page)) <= 5
+
+    # Lexical mode again: the same results as the first time.
+    choose_mode(page, "Lexikalisch")
+    wait_for_links(page, lexical_links)
+    assert field.input_value() == "Merian"
+    assert not errors
+    fresh.close()

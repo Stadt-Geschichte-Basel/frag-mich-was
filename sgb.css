@@ -138,6 +138,17 @@ a:focus-visible, input:focus-visible, button:focus-visible, summary:focus-visibl
   outline-offset: 3px;
   box-shadow: 0 0 0 6px var(--sgb-yellow);
 }
+.sgb-mode {
+  border: 0;
+  margin: 1rem 0 0;
+  min-width: 0;
+  padding: 0;
+}
+.sgb-mode legend {
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+  padding: 0;
+}
 .sgb-results {
   list-style: none;
   padding: 0;
