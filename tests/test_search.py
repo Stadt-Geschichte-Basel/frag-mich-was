@@ -1,9 +1,11 @@
 """Tests for lexical ranking, Reciprocal Rank Fusion, and the search modes."""
 
+import asyncio
 import json
 import re
 import threading
 import tomllib
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import pytest
@@ -14,14 +16,20 @@ from app import (
     RRF_K,
     TOP_K,
     Chunk,
+    Mode,
+    ModelInfo,
     best_per_publication,
     build_lexical_index,
     fuse,
     lexical_rank,
     lexical_tokens,
+    load_embedder,
     load_index,
+    query_vector,
     rank,
+    resolve_mode,
     search,
+    vector_for,
 )
 from scripts.build_index import FIXTURE_FILE, INDEX_FILE
 
@@ -203,6 +211,114 @@ def test_search_modes() -> None:
     for mode in ("semantic", "combined"):
         with pytest.raises(ValueError, match="needs a query vector"):
             search(mode, "Fischerei", None, index)
+
+
+# The browser orchestration, with a fake model in place of the browser.
+
+
+class FakeVector:
+    """Stand in for the JavaScript array that Pyodide returns."""
+
+    def __init__(self, values: list[float]) -> None:
+        self.values = values
+
+    def to_py(self) -> list[float]:
+        return list(self.values)
+
+
+class FakeModel:
+    """Count the loads and the embedded texts. Return a fixed vector."""
+
+    def __init__(self, vector: list[float] | None = None, fails: bool = False) -> None:
+        self.vector = vector or [1.0, 0.0]
+        self.fails = fails
+        self.loads = 0
+        self.texts: list[str] = []
+
+    async def load(self, model: ModelInfo) -> Callable[[str], Awaitable[FakeVector]]:
+        self.loads += 1
+        if self.fails:
+            raise RuntimeError("offline")
+
+        async def embed(text: str) -> FakeVector:
+            self.texts.append(text)
+            return FakeVector(self.vector)
+
+        return embed
+
+
+MODEL_INFO = ModelInfo(
+    document_model="a",
+    document_revision="1",
+    query_model="b",
+    query_revision="2",
+    dimensions=2,
+    query_prefix="query: ",
+)
+
+
+def test_query_vector_loads_the_model_once_and_adds_the_prefix() -> None:
+    fake, session = FakeModel(), {}
+    assert asyncio.run(query_vector(session, MODEL_INFO, "Rhein", fake.load)) == [1.0, 0.0]
+    assert asyncio.run(query_vector(session, MODEL_INFO, "Aare", fake.load)) == [1.0, 0.0]
+    assert fake.loads == 1
+    assert fake.texts == ["query: Rhein", "query: Aare"]
+    assert (session["query"], session["vector"]) == ("Aare", [1.0, 0.0])
+
+
+def test_query_vector_reuses_the_vector_of_the_last_successful_query() -> None:
+    """A change of mode runs the search again with the same query. It must not embed again."""
+    fake, session = FakeModel(), {}
+    asyncio.run(query_vector(session, MODEL_INFO, "Rhein", fake.load))
+    asyncio.run(query_vector(session, MODEL_INFO, "Rhein", fake.load))
+    assert fake.texts == ["query: Rhein"]
+
+
+def test_query_vector_failure_keeps_the_last_successful_query() -> None:
+    fake, session = FakeModel(), {}
+    asyncio.run(query_vector(session, MODEL_INFO, "Rhein", fake.load))
+    fake.vector = [3.0, 4.0]  # A vector without unit length is not valid.
+    with pytest.raises(ValueError, match="norm"):
+        asyncio.run(query_vector(session, MODEL_INFO, "Aare", fake.load))
+    assert (session["query"], session["vector"]) == ("Rhein", [1.0, 0.0])
+    offline, empty = FakeModel(fails=True), {}
+    with pytest.raises(RuntimeError, match="offline"):
+        asyncio.run(query_vector(empty, MODEL_INFO, "Rhein", offline.load))
+    assert empty == {}
+
+
+def test_vector_for_needs_no_model_in_lexical_mode() -> None:
+    fake = FakeModel()
+    assert asyncio.run(vector_for("lexical", "Rhein", {}, MODEL_INFO, fake.load)) is None
+    assert fake.loads == 0 and fake.texts == []
+
+
+@pytest.mark.parametrize("mode", ["semantic", "combined"])
+def test_vector_for_returns_the_vector_or_none_when_the_model_fails(mode: Mode) -> None:
+    assert asyncio.run(vector_for(mode, "Rhein", {}, MODEL_INFO, FakeModel().load)) == [1.0, 0.0]
+    offline = FakeModel(fails=True)
+    assert asyncio.run(vector_for(mode, "Rhein", {}, MODEL_INFO, offline.load)) is None
+    wrong = FakeModel(vector=[3.0, 4.0])
+    assert asyncio.run(vector_for(mode, "Rhein", {}, MODEL_INFO, wrong.load)) is None
+
+
+def test_the_browser_model_does_not_load_outside_the_browser() -> None:
+    with pytest.raises(RuntimeError, match="WebAssembly"):
+        asyncio.run(load_embedder(MODEL_INFO))
+
+
+@pytest.mark.parametrize(
+    ("mode", "has_vector", "expected"),
+    [
+        ("semantic", True, ("semantic", False)),
+        ("combined", True, ("combined", False)),
+        ("lexical", False, ("lexical", False)),
+        ("combined", False, ("lexical", True)),
+        ("semantic", False, (None, True)),
+    ],
+)
+def test_resolve_mode(mode: Mode, has_vector: bool, expected: tuple[Mode | None, bool]) -> None:
+    assert resolve_mode(mode, [1.0] if has_vector else None) == expected
 
 
 # The committed index and the reference vectors.

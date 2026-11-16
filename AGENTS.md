@@ -82,7 +82,8 @@ Follow [secure use of Actions](https://docs.github.com/en/actions/reference/secu
 `app.py` runs in a browser with Pyodide.
 
 * Ship pure Python, or a verified Pyodide or PyPI WASM wheel. Never ship a development tool.
-* Pin each PyPI dependency of `app.py` in its PEP 723 header. The `html-wasm` export reads the header, not `pyproject.toml`. Keep both pins equal. A test checks `bm25s`.
+* Pin each dependency of `app.py` that Pyodide does not bundle in its PEP 723 header. Today that is `bm25s`. The `html-wasm` export reads the header, not `pyproject.toml`. Keep the two pins equal. A test checks this.
+* Pyodide supplies `marimo`, `pydantic`, and `numpy` at the versions of its own lockfile. A header pin does not change them. Do not pin them in the header.
 * Do not use an OS socket, a subprocess, or a thread.
 * Use `pyodide.http.pyfetch` for HTTP.
 * Keep JavaScript to the `EMBEDDER_JS` constant. Pass each value as an argument. Never put a value into JavaScript source.

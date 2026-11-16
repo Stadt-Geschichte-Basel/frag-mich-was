@@ -71,6 +71,8 @@ The first visit needs a network connection.
 The application does not promise complete offline operation.
 
 The browser installs `bm25s` from PyPI. The export reads the pin `bm25s==0.3.16` from the PEP 723 header of `app.py`. Keep it equal to the pin in `pyproject.toml`. A test checks this.
+Pyodide supplies `marimo`, `pydantic`, and `numpy` at the versions of its own lockfile. A header pin does not change them.
+On 2026-11-16, the exported site ran `pydantic` 2.12.5 and `pydantic_core` 2.41.5, while `pyproject.toml` pins `pydantic` 2.14.3.
 Runtime and model downloads use `cdn.jsdelivr.net`, `files.pythonhosted.org`, `pypi.org`, `wasm.marimo.app`, and Hugging Face file hosts.
 Branding assets load from this site's `public/sgb/` directory.
 

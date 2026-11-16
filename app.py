@@ -19,7 +19,7 @@ with app.setup:
     import html
     import math
     import sys
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Awaitable, Callable, Iterable, Sequence
     from dataclasses import dataclass
     from pathlib import Path
     from typing import Any, Literal, cast
@@ -413,6 +413,117 @@ def search(
 
 
 @app.function
+async def load_embedder(model: ModelInfo) -> Any:
+    """Load the embedding function of the query model into the browser.
+
+    Only the browser has Pyodide and the JavaScript runtime. Elsewhere, this raises.
+
+    >>> import asyncio
+    >>> info = ModelInfo(
+    ...     document_model="a", document_revision="1", query_model="b", query_revision="2", dimensions=2
+    ... )
+    >>> asyncio.run(load_embedder(info))
+    Traceback (most recent call last):
+    RuntimeError: The model needs the WebAssembly version.
+    """
+    if not IS_WASM:
+        raise RuntimeError("The model needs the WebAssembly version.")
+    # The browser tests cover the next two statements.
+    from pyodide.code import run_js  # ty: ignore[import-not-found]  # pragma: no cover
+
+    return await run_js(EMBEDDER_JS)(  # pragma: no cover
+        TRANSFORMERS_JS_URL, model.query_model, model.query_revision, QUERY_DTYPE
+    )
+
+
+@app.function
+async def query_vector(
+    session: dict[str, Any],
+    model: ModelInfo,
+    query: str,
+    load: Callable[[ModelInfo], Awaitable[Any]],
+) -> list[float]:
+    """Return the vector of a query. Reuse the vector of the last successful query.
+
+    ``session`` keeps the embedding function (``embed``), the last successful query (``query``),
+    and its vector (``vector``). The first call loads the embedding function with ``load``.
+    A failure leaves the last successful query and its vector as they were.
+
+    >>> import asyncio
+    >>> class Vector:
+    ...     def to_py(self):
+    ...         return [1.0, 0.0]
+    >>> async def embed(text):
+    ...     return Vector()
+    >>> async def load(model):
+    ...     return embed
+    >>> info = ModelInfo(
+    ...     document_model="a", document_revision="1", query_model="b", query_revision="2", dimensions=2
+    ... )
+    >>> session = {}
+    >>> asyncio.run(query_vector(session, info, "Rhein", load))
+    [1.0, 0.0]
+    >>> session["query"]
+    'Rhein'
+    """
+    if session.get("query") == query:
+        return session["vector"]
+    if "embed" not in session:
+        session["embed"] = await load(model)
+    vector = (await session["embed"](model.query_prefix + query)).to_py()
+    check_vector(vector, model.dimensions)
+    session["query"] = query
+    session["vector"] = vector
+    return vector
+
+
+@app.function
+async def vector_for(
+    mode: Mode,
+    query: str,
+    session: dict[str, Any],
+    model: ModelInfo,
+    load: Callable[[ModelInfo], Awaitable[Any]],
+) -> list[float] | None:
+    """Return the query vector that the mode needs. Return ``None`` if the model fails.
+
+    The lexical mode needs no vector, so it never loads the model.
+
+    >>> import asyncio
+    >>> async def load(model):
+    ...     raise RuntimeError("offline")
+    >>> info = ModelInfo(
+    ...     document_model="a", document_revision="1", query_model="b", query_revision="2", dimensions=2
+    ... )
+    >>> asyncio.run(vector_for("lexical", "Rhein", {}, info, load))
+    >>> asyncio.run(vector_for("semantic", "Rhein", {}, info, load))
+    """
+    if mode == "lexical":
+        return None
+    try:
+        return await query_vector(session, model, query, load)
+    except Exception:
+        return None
+
+
+@app.function
+def resolve_mode(mode: Mode, vector: Sequence[float] | None) -> tuple[Mode | None, bool]:
+    """Choose the mode to search in. Also say whether the result is degraded.
+
+    Without the vector, the combined mode falls back to the lexical mode, and the semantic
+    mode has no result (``None``).
+
+    >>> resolve_mode("combined", [1.0]), resolve_mode("combined", None)
+    (('combined', False), ('lexical', True))
+    >>> resolve_mode("semantic", None), resolve_mode("lexical", None)
+    ((None, True), ('lexical', False))
+    """
+    if mode == "lexical" or vector is not None:
+        return mode, False
+    return ("lexical" if mode == "combined" else None), True
+
+
+@app.function
 def corpus_counts(chunks: Sequence[Chunk]) -> tuple[int, int]:
     """Count book volumes and distinct Data Stories separately.
 
@@ -587,49 +698,30 @@ async def _(form, index, lexical, mode, retry, session):
         mo.Html('<p role="status">Gib ein Thema oder eine Frage ein. Wähle dann «Suchen».</p>'),
     )
     _mode: Mode = mode.value
-    _vector = None
     if _mode != "lexical":
-        if session.get("query") == _query:
-            _vector = session["vector"]
-        else:
-            mo.stop(
-                _mode == "semantic" and not IS_WASM,
-                mo.callout(
-                    mo.md(
-                        "Die semantische Suche benötigt die WebAssembly-Version. "
-                        "Öffne die veröffentlichte Webseite."
-                    ),
-                    kind="warn",
+        mo.stop(
+            _mode == "semantic" and not IS_WASM,
+            mo.callout(
+                mo.md(
+                    "Die semantische Suche benötigt die WebAssembly-Version. "
+                    "Öffne die veröffentlichte Webseite."
                 ),
+                kind="warn",
+            ),
+        )
+        if IS_WASM and session.get("query") != _query:
+            mo.output.replace(
+                mo.Html(
+                    '<p role="status">Die erste Suche wird vorbereitet. '
+                    "Dafür laden wir etwa 120 MB herunter. Das kann einen Moment dauern.</p>"
+                    if "embed" not in session
+                    else '<p role="status">Suche läuft.</p>'
+                )
             )
-            try:
-                if IS_WASM:
-                    if "embed" not in session:
-                        mo.output.replace(
-                            mo.Html(
-                                '<p role="status">Die erste Suche wird vorbereitet. '
-                                "Dafür laden wir etwa 120 MB herunter. "
-                                "Das kann einen Moment dauern.</p>"
-                            )
-                        )
-                        from pyodide.code import run_js  # ty: ignore[import-not-found]
-
-                        session["embed"] = await run_js(EMBEDDER_JS)(
-                            TRANSFORMERS_JS_URL,
-                            index.model.query_model,
-                            index.model.query_revision,
-                            QUERY_DTYPE,
-                        )
-                    mo.output.replace(mo.Html('<p role="status">Suche läuft.</p>'))
-                    _vector = (await session["embed"](index.model.query_prefix + _query)).to_py()
-                    check_vector(_vector, index.model.dimensions)
-                    session["query"] = _query
-                    session["vector"] = _vector
-            except Exception:
-                _vector = None
-    _failed = _mode != "lexical" and _vector is None
+    _vector = await vector_for(_mode, _query, session, index.model, load_embedder)
+    _search_mode, _degraded = resolve_mode(_mode, _vector)
     _parts: list[Any] = []
-    if _failed and _mode == "semantic":
+    if _search_mode is None:
         _parts.append(
             mo.callout(
                 mo.Html(
@@ -642,7 +734,7 @@ async def _(form, index, lexical, mode, retry, session):
         )
         _parts.append(retry)
     else:
-        if _failed:
+        if _degraded:
             _parts.append(
                 mo.callout(
                     mo.Html(
@@ -660,7 +752,7 @@ async def _(form, index, lexical, mode, retry, session):
                 "keine generierten Antworten."
             )
         )
-        _results = search("lexical" if _failed else _mode, _query, _vector, lexical)
+        _results = search(_search_mode, _query, _vector, lexical)
         _parts.append(mo.Html(render_results(_results)))
     mo.output.replace(mo.vstack(_parts))
     return
