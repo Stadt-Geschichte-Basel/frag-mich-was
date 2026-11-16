@@ -4,6 +4,7 @@ import json
 import math
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ from app import (
     TOP_K,
     Chunk,
     build_lexical_index,
+    check_vector,
     load_index,
     search,
 )
@@ -28,14 +30,21 @@ from scripts.compare_modes import (
     EXPECTED_TOP,
     MODE_NAMES,
     Comparison,
+    ExampleResult,
     RankRow,
     ReferenceResult,
     compare,
+    comparison_items,
     evaluate,
+    evaluate_example,
+    example_rows,
+    filter_examples,
     format_rank,
     lexical_excerpts,
+    load_comparison,
     load_reference,
     main,
+    markdown_table,
     overlap,
     pass_counts,
     position,
@@ -43,8 +52,10 @@ from scripts.compare_modes import (
     rank_table,
     reference_items,
     reference_table,
+    summary_rows,
     top_keys,
 )
+from scripts.comparison_queries import KIND_NAMES, QUERY_EXAMPLES
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -143,6 +154,7 @@ INDEX = load_index(INDEX_FILE.read_text(encoding="utf-8"))
 FIXTURE = json.loads(FIXTURE_FILE.read_text(encoding="utf-8"))
 LEXICAL = build_lexical_index(INDEX.chunks)
 ITEMS = reference_items(FIXTURE)
+ALL_ITEMS = comparison_items(FIXTURE)
 
 
 def test_reference_items_cover_the_chapter_and_the_story_queries() -> None:
@@ -150,7 +162,7 @@ def test_reference_items_cover_the_chapter_and_the_story_queries() -> None:
     assert len(ITEMS) == 1 + len(FIXTURE["story_references"])
 
 
-@pytest.mark.parametrize("item", ITEMS, ids=lambda item: item["query"][:30])
+@pytest.mark.parametrize("item", ALL_ITEMS, ids=lambda item: item["query"][:30])
 def test_comparison_agrees_with_the_search_modes(item: dict) -> None:
     """The comparison and the page rank alike, so that the notebook shows what users get."""
     comparison = compare(item["query"], item["embedding"], LEXICAL)
@@ -160,7 +172,7 @@ def test_comparison_agrees_with_the_search_modes(item: dict) -> None:
         assert ids(comparison.ranking(mode)[:TOP_K]) == shown, mode
 
 
-@pytest.mark.parametrize("item", ITEMS, ids=lambda item: item["query"][:30])
+@pytest.mark.parametrize("item", ALL_ITEMS, ids=lambda item: item["query"][:30])
 def test_each_ranking_is_complete_and_distinct(item: dict) -> None:
     comparison = compare(item["query"], item["embedding"], LEXICAL)
     publications = {publication(chunk) for chunk in INDEX.chunks}
@@ -175,7 +187,7 @@ def test_each_ranking_is_complete_and_distinct(item: dict) -> None:
     }
 
 
-@pytest.mark.parametrize("item", ITEMS, ids=lambda item: item["query"][:30])
+@pytest.mark.parametrize("item", ALL_ITEMS, ids=lambda item: item["query"][:30])
 def test_rank_table_matches_each_mode(item: dict) -> None:
     comparison = compare(item["query"], item["embedding"], LEXICAL)
     rows = rank_table(comparison)
@@ -206,7 +218,10 @@ def test_main_prints_the_table(capsys: pytest.CaptureFixture[str]) -> None:
     main()
     output = capsys.readouterr().out
     assert output.startswith("| Query |")
-    assert output.count("\n| ") == len(ITEMS) + 1
+    query_table, rest = output.split("\n\n", 1)
+    assert len(query_table.splitlines()) == len(ALL_ITEMS) + 2
+    assert "Coverage@3" in rest and "All found@5" in rest
+    assert "Cross-source" in rest
     assert f"top {EXPECTED_TOP}" in output
 
 
@@ -221,10 +236,12 @@ def test_load_reference_matches_the_committed_files() -> None:
 
 def test_notebook_runs_and_shows_the_reference_results() -> None:
     _outputs, defs = compare_app.run()
-    assert [result.query for result in defs["results"]] == [item["query"] for item in ITEMS]
-    assert defs["results"] == [evaluate(item, LEXICAL) for item in ITEMS]
-    # The first reference query is the default of the picker. No model loads for it.
-    assert defs["comparison"].query == ITEMS[0]["query"]
+    assert {query.query for query in defs["report"].queries} == {
+        item["query"] for item in ALL_ITEMS
+    }
+    assert defs["selected"] == defs["report"].queries[0]
+    assert defs["kind_filter"].value == defs["topic_filter"].value == "all"
+    assert not defs["misses_only"].value
     assert "encoder" not in defs["cache"]
 
 
@@ -248,3 +265,205 @@ def test_free_query_encoder_reproduces_the_reference_vector() -> None:
     vector = embed(load_encoder(), [MODEL.query_prefix + REFERENCE_QUERY])[0]
     reference = FIXTURE["reference"]["embedding"]
     assert math.sumprod(vector, reference) > 0.999
+
+
+# Expanded examples and measurements. Their retrieval quality is measured, not asserted.
+
+
+def test_catalogue_covers_all_volumes_and_stories_with_source_evidence() -> None:
+    assert len(ALL_ITEMS) == 44
+    assert len({item["query"] for item in ALL_ITEMS}) == 44
+    assert Counter(case.kind for case in QUERY_EXAMPLES) == {
+        "specific": 16,
+        "synonyms": 8,
+        "complex": 8,
+        "cross-source": 4,
+    }
+    sources = {chunk.source: chunk.url for chunk in INDEX.chunks}
+    covered = {source for case in QUERY_EXAMPLES for source, _ in case.evidence}
+    assert {source[4:6] for source in covered if source.startswith("sgb-")} == {
+        f"{number:02d}" for number in range(1, 10)
+    }
+    assert len([source for source in covered if source.startswith("data-story-")]) == 7
+    for case in QUERY_EXAMPLES:
+        assert len(case.expected_urls) == (2 if case.kind == "cross-source" else 1)
+        assert len(set(case.expected_urls)) == len(case.expected_urls)
+        assert tuple(sources[source] for source, _ in case.evidence) == case.expected_urls
+        for source, note in case.evidence:
+            assert note in (ROOT / "content" / source).read_text(encoding="utf-8")
+
+
+def test_generated_examples_match_the_catalogue_and_have_valid_vectors() -> None:
+    for item, case in zip(FIXTURE["comparison_references"], QUERY_EXAMPLES, strict=True):
+        assert (item["query"], item["topic"], item["kind"], tuple(item["expected_urls"])) == (
+            case.query,
+            case.topic,
+            case.kind,
+            case.expected_urls,
+        )
+        check_vector(item["embedding"], MODEL.dimensions)
+
+
+def synthetic_result(kind: str = "cross-source") -> ExampleResult:
+    return ExampleResult(
+        Comparison("q", [], [], []),
+        "Topic",
+        kind,
+        (RankRow("A", "a", 1, None, 1), RankRow("B", "b", 4, None, 6)),
+    )
+
+
+def test_partial_and_complete_retrieval_use_every_expected_source() -> None:
+    result = synthetic_result()
+    assert result.coverage("semantic", 3) == 0.5
+    assert result.coverage("semantic", 5) == 1.0
+    assert result.coverage("lexical", 5) == 0.0
+    assert not result.all_found("semantic", 3)
+    assert result.all_found("semantic", 5)
+    assert not result.all_found("combined", 5)
+    assert result.coverage("semantic", 0) == 0.0
+
+
+def test_grouped_coverage_gives_each_query_equal_weight() -> None:
+    multi = synthetic_result()
+    single = ExampleResult(multi.comparison, "Other", "specific", multi.expected[:1])
+    rows = summary_rows([single, multi])
+    semantic = next(
+        row for row in rows if row["Type"] == "All queries" and row["Mode"] == "Semantisch"
+    )
+    assert semantic == {
+        "Type": "All queries",
+        "Mode": "Semantisch",
+        "Queries": 2,
+        "Coverage@3": 0.75,
+        "All found@3": 1,
+        "Coverage@5": 1.0,
+        "All found@5": 2,
+    }
+    assert {row["Type"] for row in rows} == {"All queries", "Specific", "Cross-source"}
+    assert summary_rows([]) == []
+
+
+def test_filters_combine_type_topic_and_misses_and_preserve_order() -> None:
+    missed = synthetic_result()
+    complete = ExampleResult(
+        Comparison("complete", [], [], []),
+        "Other",
+        "specific",
+        (RankRow("A", "a", 1, 1, 1),),
+    )
+    results = [missed, complete]
+    assert filter_examples(results) == results
+    assert filter_examples(results, misses_only=True) == [missed]
+    assert filter_examples(results, kind="specific") == [complete]
+    assert filter_examples(results, topic="Topic") == [missed]
+    assert filter_examples(results, kind="specific", topic="Topic") == []
+    assert filter_examples(results, kind="specific", topic="Other", misses_only=True) == []
+
+
+def test_evaluator_records_missing_and_skipped_sources_without_passing() -> None:
+    lexical = build_lexical_index([make("a", title="Rhein", text="Rhein", url="u")])
+    item = {
+        "query": "xyzzy",
+        "embedding": [1.0],
+        "expected_urls": ["u", "absent"],
+        "topic": "Topic",
+        "kind": "cross-source",
+    }
+    result = evaluate_example(item, lexical)
+    assert result.expected == (
+        RankRow("Rhein", "u", 1, None, 1),
+        RankRow("absent", "absent", None, None, None),
+    )
+    assert result.coverage("semantic") == 0.5
+    assert not result.all_found("combined")
+    row = example_rows([result])[0]
+    assert row["Semantisch"] == "1, — ✗"
+    assert row["Lexikalisch"] == "—, — ✗"
+    assert row["Expected publications"] == "Rhein / absent"
+
+
+@pytest.mark.parametrize("keys", [[], ["u", "u"]])
+def test_evaluator_rejects_empty_or_duplicate_expected_sources(keys: list[str]) -> None:
+    with pytest.raises(ValueError, match="nonempty and distinct"):
+        evaluate_example({"expected_urls": keys}, LEXICAL)
+
+
+def test_markdown_table_escapes_delimiters_and_newlines() -> None:
+    assert markdown_table([{"Query": "a|b\nc"}]).splitlines()[-1] == r"| a\|b c |"
+    assert markdown_table([]) == "No queries match the filters."
+
+
+def test_load_comparison_matches_the_saved_examples() -> None:
+    lexical, items = load_comparison()
+    assert len(lexical.chunks) == len(INDEX.chunks)
+    assert items == ALL_ITEMS
+    assert {item["expected_url"] for item in items[: len(ITEMS)]} == {
+        item["expected_url"] for item in ITEMS
+    }
+    assert all(item["kind"] != "reference" for item in items)
+    assert {item["kind"] for item in items} == set(KIND_NAMES)
+
+
+def test_python_model_reproduces_all_expanded_query_vectors() -> None:
+    pytest.importorskip("sentence_transformers")
+    vectors = embed(load_encoder(), [MODEL.query_prefix + case.query for case in QUERY_EXAMPLES])
+    for vector, item in zip(vectors, FIXTURE["comparison_references"], strict=True):
+        assert math.sumprod(vector, item["embedding"]) > 0.999, item["query"]
+
+
+def test_notebook_shows_both_expected_links_for_a_cross_source_query() -> None:
+    from types import SimpleNamespace
+
+    from scripts.comparison_report import build_report
+
+    query = build_report().queries[-1]
+    outputs, defs = compare_app.run(
+        defs={"filtered": [query], "page_picker": SimpleNamespace(value=0)}
+    )
+    assert defs["selected"] == query
+    texts = [getattr(output, "text", "") for output in outputs]
+    assert any("Erwartete Publikationen" in text for text in texts)
+    for row in query.expected:
+        assert any(row.key in text for text in texts)
+    assert "encoder" not in defs["cache"]
+
+
+def test_notebook_handles_filters_with_no_matches() -> None:
+    from types import SimpleNamespace
+
+    outputs, defs = compare_app.run(
+        defs={
+            "kind_filter": SimpleNamespace(value="synonyms"),
+            "topic_filter": SimpleNamespace(value="Schweizerhalle"),
+            "misses_only": SimpleNamespace(value=False),
+        }
+    )
+    assert defs["filtered"] == []
+    assert "picker" not in defs and "selected" not in defs
+    assert any("Keine Fragen passen" in getattr(output, "text", "") for output in outputs)
+
+
+def test_free_query_reuses_the_encoder_and_clears_expected_source_annotations() -> None:
+    from types import SimpleNamespace
+
+    class Encoder:
+        def encode(
+            self, texts: list[str], *, normalize_embeddings: bool, batch_size: int
+        ) -> list[list[float]]:
+            assert texts == [MODEL.query_prefix + "Rhein"]
+            assert normalize_embeddings and batch_size == 32
+            return [ITEMS[0]["embedding"]]
+
+    cache = {"encoder": Encoder(), "lexical": LEXICAL}
+    outputs, defs = compare_app.run(
+        defs={
+            "free": SimpleNamespace(value=" Rhein "),
+            "picker": None,
+            "cache": cache,
+        }
+    )
+    assert defs["selected"].expected == []
+    assert defs["selected"].query == "Rhein"
+    assert defs["cache"] is cache
+    assert any("keine erwarteten Quellen" in getattr(output, "text", "") for output in outputs)

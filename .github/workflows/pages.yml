@@ -34,7 +34,7 @@ jobs:
           uv run ruff format --check .
           uv run ty check
           uv run pytest
-          uv run marimo check app.py --select MW
+          uv run marimo check app.py compare.py --select MW
 
       - name: Export
         run: |
@@ -46,6 +46,13 @@ jobs:
           test "$(grep -c '<meta name="description"' dist/index.html)" = 1
           test "$(grep -c '<link rel="canonical" href="https://dokumentation.stadtgeschichtebasel.ch/frag-mich-was/">' dist/index.html)" = 1
           test "$(grep -c '<meta property="og:' dist/index.html)" = 7
+          test -s dist/vergleich.html
+          grep -q '<html lang="de-CH">' dist/vergleich.html
+          test "$(grep -c '<title>Suchmodi vergleichen | Frag mich was – Stadt.Geschichte.Basel</title>' dist/vergleich.html)" = 1
+          test "$(grep -c '<meta name="description"' dist/vergleich.html)" = 1
+          test "$(grep -c '<link rel="canonical" href="https://dokumentation.stadtgeschichtebasel.ch/frag-mich-was/vergleich.html">' dist/vergleich.html)" = 1
+          test "$(grep -c '<meta property="og:' dist/vergleich.html)" = 7
+          test -s dist/public/comparison.json
           test -s dist/public/embeddings.json
           test -d dist/assets
 

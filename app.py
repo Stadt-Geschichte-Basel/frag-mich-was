@@ -775,6 +775,8 @@ def _():
     Er findet nur ganze Wörter in derselben Form und braucht kein Sprachmodell.
     «Kombiniert» führt die semantische und die lexikalische Suche zusammen.
     Wenn du den Modus wechselst, bleibt deine Eingabe erhalten.</p>
+    <p><a href="vergleich.html">Suchmodi vergleichen</a>:
+    Erkunde Beispielfragen, Quellen und die Ranglisten der drei Suchmodi.</p>
     <p>Die Suche kann wichtige Stellen übersehen oder unpassende Stellen anzeigen.
     Die Textstellen sind keine geprüften Antworten auf deine Eingabe.
     Prüfe die Aussage und ihren Zusammenhang in der Originalpublikation.</p>

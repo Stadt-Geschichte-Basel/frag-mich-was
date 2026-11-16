@@ -5,6 +5,7 @@ Run from the repository root::
     uv run --group index python -m scripts.build_index
 """
 
+import argparse
 import html
 import importlib
 import json
@@ -15,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from app import ModelInfo, load_index
+from scripts.comparison_queries import QUERY_EXAMPLES
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTENT_DIR = ROOT / "content"
@@ -276,9 +278,14 @@ def embed(encoder: Any, texts: Sequence[str]) -> list[list[float]]:
     return [[round(float(value), DECIMALS) for value in vector] for vector in vectors]
 
 
-def main() -> None:  # pragma: no cover - needs the embedding model; tests read its committed output
-    """Chunk and embed the content. Validate the index. Then write the index and the fixture."""
-    encoder = load_encoder()
+def write_index(
+    encoder: Any,
+) -> None:  # pragma: no cover - needs the model tokenizer; tests cover the pure build functions
+    """Build the passage index with the pinned encoder.
+
+    >>> callable(write_index)
+    True
+    """
 
     def count_tokens(text: str) -> int:
         return len(encoder.tokenizer.encode(text, add_special_tokens=False))
@@ -303,7 +310,16 @@ def main() -> None:  # pragma: no cover - needs the embedding model; tests read 
     INDEX_FILE.parent.mkdir(parents=True, exist_ok=True)
     INDEX_FILE.write_text(text, encoding="utf-8")
 
-    fixture = {
+    print(f"{len(chunks)} passages from {len(documents)} documents -> {INDEX_FILE}")
+
+
+def build_fixture(encoder: Any) -> dict[str, Any]:
+    """Build reference and comparison vectors with the same query prefix.
+
+    >>> callable(build_fixture)
+    True
+    """
+    return {
         "model": MODEL.model_dump(),
         "sentences": [
             {"text": sentence, "embedding": vector}
@@ -323,15 +339,48 @@ def main() -> None:  # pragma: no cover - needs the embedding model; tests read 
                 strict=True,
             )
         ],
+        "comparison_references": [
+            {
+                "query": item.query,
+                "topic": item.topic,
+                "kind": item.kind,
+                "expected_urls": list(item.expected_urls),
+                "embedding": vector,
+            }
+            for item, vector in zip(
+                QUERY_EXAMPLES,
+                embed(encoder, [MODEL.query_prefix + item.query for item in QUERY_EXAMPLES]),
+                strict=True,
+            )
+        ],
         "reference": {
             "query": REFERENCE_QUERY,
             "expected_url": REFERENCE_EXPECTED_URL,
             "embedding": embed(encoder, [MODEL.query_prefix + REFERENCE_QUERY])[0],
         },
     }
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    """Build all outputs, or rebuild only query fixtures.
+
+    >>> callable(main)
+    True
+    """
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--fixtures-only", action="store_true", help="Keep the passage index unchanged."
+    )
+    args = parser.parse_args(argv)
+    if args.fixtures_only and load_index(INDEX_FILE.read_text(encoding="utf-8")).model != MODEL:
+        raise ValueError("The index uses another model. Build the complete index first.")
+    encoder = load_encoder()
+    if not args.fixtures_only:
+        write_index(encoder)
+    fixture = build_fixture(encoder)
     FIXTURE_FILE.parent.mkdir(parents=True, exist_ok=True)
     FIXTURE_FILE.write_text(json.dumps(fixture, ensure_ascii=False) + "\n", encoding="utf-8")
-    print(f"{len(chunks)} passages from {len(documents)} documents -> {INDEX_FILE}")
+    print(f"{len(QUERY_EXAMPLES)} comparison examples -> {FIXTURE_FILE}")
 
 
 if __name__ == "__main__":

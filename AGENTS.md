@@ -26,11 +26,11 @@ Pin versions in `pyproject.toml`. Commit `uv.lock`. Install with `uv sync --lock
 ## 3. Code
 
 * Use a type hint everywhere.
-* Use Pydantic at an I/O boundary. The index file is the I/O boundary of this repository.
+* Use Pydantic at an I/O boundary. The index and comparison report are the I/O boundaries of this repository.
 * Use a dataclass for an internal carrier. Keep core logic in pure functions.
 * Put a runnable example in each docstring.
 * Require 100% coverage on core logic. Keep each exclusion narrow and explicit.
-* The browser gets only `app.py`. Put browser logic in a top-level function of `app.py`, not in a cell.
+* The browser gets `app.py` and `compare.py`. Put browser logic in top-level functions of these notebooks, not in cells.
 * Never edit `public/embeddings.json` or `tests/fixtures/reference_vectors.json` by hand. Run the index build.
 * Import chapter HTML with `scripts/import_sgb.py`. Keep imported `sgb-*.md` files generated.
 
@@ -40,7 +40,7 @@ Run this gate before each commit. CI runs the same gate.
 uv run ruff check . && uv run ruff format --check .
 uv run ty check
 uv run pytest
-uv run marimo check app.py --select MW
+uv run marimo check app.py compare.py --select MW
 ```
 
 `uv run pytest` includes the doctests and requires 100% coverage.
@@ -51,7 +51,7 @@ Other commands:
 uv run --group index python -m scripts.build_index          # Build the index and the fixture.
 uv run python -m scripts.export_site    # Export the site.
 uv run pytest -m browser --no-cov                           # Browser tests. They need dist/ and a network.
-uv run marimo edit compare.py                               # Compare the search modes. It runs locally. It does not ship.
+uv run marimo edit compare.py                               # Compare the saved queries locally.
 uv run --group index marimo edit compare.py                 # Add free queries to the comparison.
 uv run python -m scripts.compare_modes                      # Print the reference table.
 ```
@@ -79,7 +79,8 @@ Follow [secure use of Actions](https://docs.github.com/en/actions/reference/secu
 
 ## 6. Browser and WASM
 
-`app.py` runs in a browser with Pyodide.
+`app.py` and `compare.py` run in a browser with Pyodide.
+The comparison loads a generated report. It does not load the search index or an embedding model.
 
 * Ship pure Python, or a verified Pyodide or PyPI WASM wheel. Never ship a development tool.
 * Pin each dependency of `app.py` that Pyodide does not bundle in its PEP 723 header. Today that is `bm25s`. The `html-wasm` export reads the header, not `pyproject.toml`. Keep the two pins equal. A test checks this.

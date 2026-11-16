@@ -124,26 +124,90 @@ A test checks this natively.
 
 ## Compare the search modes
 
-The notebook `compare.py` ranks each query in all three modes. It runs on your machine. The published site does not include it.
+The notebook `compare.py` compares 44 queries in all three modes.
+The published subpage is `vergleich.html`. **Über die Suche** links to it with **Suchmodi vergleichen**.
+The page uses Swiss Standard German and the same SGB design as the search. **Zur Suche** returns to the main page.
 
 ```bash
-uv run marimo edit compare.py                 # The reference queries.
-uv run --group index marimo edit compare.py   # Adds free queries. This loads the Python model.
-uv run python -m scripts.compare_modes        # Prints the reference table in a terminal.
+uv run marimo edit compare.py                 # Opens the saved examples. No model is needed.
+uv run --group index marimo edit compare.py   # Enables free queries with the Python model.
+uv run python -m scripts.compare_modes        # Prints the query table and summaries.
 ```
 
-The notebook shows:
+The catalogue covers all nine volumes and all seven Data Stories.
+All questions use four search-intent categories:
 
-- The rank of the expected publication for each reference query in each mode. A tick marks a rank in the top three.
-- For one query, the rank in each mode of every publication that any mode shows.
-- The number of publications that the lexical mode matches, how many publications the combined top five shares with the other two modes, and how many combined excerpts come from a lexical passage.
-- The result lists of the three modes side by side.
+- **Gezielte Suche:** 18 queries use names, dates, places, or technical terms.
+- **Andere Formulierungen:** Nine queries use different words for a topic.
+- **Erklärende Fragen:** 13 queries ask about processes, causes, or relationships.
+- **Mehrere Quellen:** Four questions span two expected publications each.
 
-`scripts/compare_modes.py` holds the logic. `tests/test_compare.py` checks it, and checks that it ranks like the page.
-A free query uses the build code to embed the query with the Python model. The browser model gives nearly the same vector. A test compares the Python vector with the reference fixture.
+`scripts/comparison_queries.py` holds the examples, expected source links, and local source notes.
+Paired variants let users compare different words for the same topic.
+For example, “Erbleihe, Ehrschatz und Grundzins bei Basler Häusern” has this variant:
+“Weshalb mussten Hauseigentümer in Basel Geld an geistliche Institutionen zahlen, obwohl sie ihre Liegenschaften verkaufen konnten?”
 
-On the eight reference queries, the expected publication ranks in the top three for **Semantisch** in 7 queries, **Lexikalisch** in 7, and **Kombiniert** in 8.
-The reference queries are questions with distinctive words. They do not show how the modes behave on other queries.
+The page starts with **Was der Vergleich zeigt**. It draws its counts and ranking examples from the report.
+The conclusions apply to the 44 selected examples.
+
+The notebook shows summaries by query type. Filters select a type, a topic, or queries with a miss in any mode's top three.
+The query table shows the rank of each expected publication. Ranks follow the source order in the table.
+A tick requires every expected publication in the top three. A dash means that the mode skips a publication.
+
+The selected query shows linked expected sources, individual ranks, and all three result lists side by side.
+Narrow screens stack the result lists. Tables wrap long questions and publication titles.
+It also shows ranking overlaps and the origin of combined excerpts.
+
+Free queries are available only in local sessions with the `index` dependency group. They have no expected-source annotation.
+The published page provides the 44 saved examples. It downloads neither the search index nor an embedding model.
+
+**Abdeckung@k** is the mean fraction of expected sources found in the first k results, calculated separately for each query.
+Each query has equal weight. **Vollständig@k** counts queries with every expected source in the first k results.
+A question with one of its two sources retrieved has 50 percent coverage. It does not count as complete.
+The summaries report both measures for the first three and first five results.
+
+Expected sources identify supported publications. Other results can also be relevant. The catalogue is not an exhaustive relevance judgement.
+
+The committed index and vectors gave these results on 2026-11-16:
+
+| Mode | Vollständig@3 | Abdeckung@3 | Vollständig@5 | Abdeckung@5 |
+| --- | --- | --- | --- | --- |
+| Semantisch | 38 of 44 | 89.8% | 40 of 44 | 93.2% |
+| Lexikalisch | 31 of 44 | 72.7% | 34 of 44 | 80.7% |
+| Kombiniert | 38 of 44 | 88.6% | 41 of 44 | 94.3% |
+
+All modes find the 18 targeted queries in the top three.
+For alternative wording, semantic and combined modes each find eight of nine. Lexical search finds four.
+For explanatory questions, semantic and combined search each find eleven of thirteen. Lexical search finds nine.
+For cross-source questions, semantic and combined modes each find both sources once in four queries. Lexical search completes none.
+These examples show that combined search can lower a source's rank.
+The Schweizerhalle paraphrase ranks its expected source second semantically and eighth in combined mode.
+
+Eight established queries retain their regression checks. The public page classifies them by search intent, like every other query.
+The other examples have no retrieval success threshold.
+They check source evidence, vectors, metrics, filters, and agreement with the application.
+`scripts/compare_modes.py` holds the comparison logic. `tests/test_compare.py` checks it.
+Model-enabled tests reproduce every new query vector with the pinned Python model.
+Browser tests check both pages, navigation, filters, source links, failure messages, and narrow layouts in Chromium and Firefox.
+
+After a catalogue change, regenerate the fixture:
+
+```bash
+uv run --locked --group index python -m scripts.build_index --fixtures-only
+```
+
+This command preserves the passage index. The full index build also generates the comparison vectors.
+
+The site export calculates all saved rankings with the committed index and vectors.
+It writes the validated report to `dist/public/comparison.json` and exports the comparison to `dist/vergleich.html`.
+The report contains query types, summaries, source ranks, ranking overlaps, and result excerpts. It contains no embeddings.
+The browser validates the report with Pydantic and uses `pyfetch` to load it.
+The comparison uses only the standard library, marimo, and Pydantic in the browser. Local helpers stay outside the deployed runtime.
+
+Both pages share the existing assets. CI requires both HTML files and the report before it uploads the Pages artifact.
+Production deployment follows the existing workflow on `main` after the PR is merged.
+
+Run the repository gate after generation. Commit the catalogue and generated fixture together.
 
 ## Set up
 
@@ -235,7 +299,7 @@ The query model and its download size stay unchanged.
 uv run ruff check . && uv run ruff format --check .
 uv run ty check
 uv run pytest
-uv run marimo check app.py --select MW
+uv run marimo check app.py compare.py --select MW
 ```
 
 Pytest includes doctests and requires 100% coverage of core logic.

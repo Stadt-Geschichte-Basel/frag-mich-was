@@ -513,27 +513,32 @@ def test_export_site_prepares_metadata_and_preserves_output_on_export_failure(
 
     monkeypatch.setattr(export_site, "ROOT", tmp_path)
     output = tmp_path / "dist" / "index.html"
+    comparison = tmp_path / "dist" / "vergleich.html"
     raw = '<html lang="en"><head><meta name="theme-color" content="#000000"/><meta name="theme-color" content="#3a1e3e"></head></html>'
 
     def export(command: list[str], *, cwd: Path, check: bool) -> None:
         assert cwd == tmp_path and check
+        assert command[5] in {"app.py", "compare.py"}
         assert command[1:] == [
             "-m",
             "marimo",
             "export",
             "html-wasm",
-            "app.py",
+            command[5],
             "-o",
-            "dist",
+            "dist" if command[5] == "app.py" else "dist/vergleich.html",
             "--mode",
             "run",
         ]
-        output.parent.mkdir()
-        output.write_text(raw, encoding="utf-8")
+        output.parent.mkdir(exist_ok=True)
+        target = output if command[5] == "app.py" else comparison
+        target.write_text(raw, encoding="utf-8")
 
     monkeypatch.setattr(export_site.subprocess, "run", export)
     export_site.main()
     prepared = output.read_text(encoding="utf-8")
+    assert comparison.read_text(encoding="utf-8") == prepared
+    assert (output.parent / "public" / "comparison.json").is_file()
     assert '<html lang="de-CH">' in prepared
     assert prepared.count('name="theme-color"') == 1
     assert 'content="#3a1e3e"' in prepared

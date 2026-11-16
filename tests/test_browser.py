@@ -596,3 +596,111 @@ def test_local_versions_match_the_pyodide_lockfile(context: BrowserContext, site
         lockfile["info"]["python"].rsplit(".", 1)[0]
         == f"{sys.version_info[0]}.{sys.version_info[1]}"
     )
+
+
+def test_comparison_saved_queries_navigation_and_filters(
+    context: BrowserContext, site: str
+) -> None:
+    """The public comparison uses saved data and links back to the search."""
+    page = context.new_page()
+    requests: list[str] = []
+    errors: list[str] = []
+    page.on("request", lambda request: requests.append(request.url))
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.goto(site + "vergleich.html")
+    expect(page.get_by_role("heading", name="Suchmodi vergleichen", exact=True)).to_be_visible(
+        timeout=LOAD_TIMEOUT
+    )
+    expect(page.get_by_role("combobox", name="Beispielfrage", exact=True)).to_be_visible(
+        timeout=LOAD_TIMEOUT
+    )
+    assert page.locator("html").get_attribute("lang") == "de-CH"
+    assert page.title() == "Suchmodi vergleichen | Frag mich was – Stadt.Geschichte.Basel"
+    assert (
+        page.locator(".sgb-brand").evaluate("el => getComputedStyle(el).backgroundColor")
+        == "rgb(58, 30, 62)"
+    )
+    assert "Euclid Circular B" in page.locator("body").evaluate(
+        "el => getComputedStyle(el).fontFamily"
+    )
+    assert page.get_by_role("textbox").count() == 0
+    expect(page.get_by_role("heading", name="Was der Vergleich zeigt", exact=True)).to_be_visible()
+    expect(page.locator(".sgb-insights")).to_contain_text("18 von 18")
+    expect(page.locator(".sgb-insights")).to_contain_text("Schweizerhalle")
+
+    page.get_by_role("combobox", name="Fragetyp", exact=True).select_option(label="Mehrere Quellen")
+    expect(page.get_by_text("4 Fragen passen zu den Filtern.", exact=False)).to_be_visible()
+    reference = FIXTURE["comparison_references"][-1]
+    page.get_by_role("combobox", name="Beispielfrage", exact=True).select_option(
+        label=reference["query"]
+    )
+    expected = page.locator(".sgb-expected a")
+    expect(expected).to_have_count(2)
+    expect(expected.first).to_have_attribute("href", reference["expected_urls"][0])
+    assert (
+        expected.evaluate_all("links => links.map(link => link.href)") == reference["expected_urls"]
+    )
+    expect(page.locator(".sgb-comparison-results section")).to_have_count(3)
+    assert not any(
+        "embeddings.json" in url or "huggingface" in url or ".onnx" in url or "transformers" in url
+        for url in requests
+    )
+    assert any("/frag-mich-was/public/comparison.json" in url for url in requests)
+    assert errors == []
+
+    page.get_by_role("combobox", name="Fragetyp", exact=True).select_option(
+        label="Andere Formulierungen"
+    )
+    page.get_by_role("combobox", name="Thema", exact=True).select_option(label="Schweizerhalle")
+    expect(page.get_by_text("Keine Fragen passen zu den Filtern.", exact=False)).to_be_visible()
+    expect(page.get_by_role("combobox", name="Beispielfrage", exact=True)).to_have_count(0)
+    page.get_by_role("combobox", name="Fragetyp", exact=True).select_option(label="Alle")
+    page.get_by_role("combobox", name="Thema", exact=True).select_option(label="Alle")
+    expect(page.get_by_text("44 Fragen passen zu den Filtern.", exact=False)).to_be_visible()
+    page.get_by_role("checkbox", name="Nur Fragen mit fehlenden Quellen in den Top 3").check()
+    expect(page.get_by_text("44 Fragen passen zu den Filtern.", exact=False)).to_have_count(0)
+
+    page.set_viewport_size({"width": 390, "height": 844})
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    columns = page.locator(".sgb-comparison-results").evaluate(
+        "el => getComputedStyle(el).gridTemplateColumns"
+    )
+    assert len(columns.split()) == 1
+    back = page.locator(".sgb-brand").get_by_role("link", name="Zur Suche", exact=True)
+    page.locator(".sgb-brand a").first.focus()
+    page.keyboard.press("Tab")
+    assert back.evaluate("el => el.getRootNode().activeElement === el")
+    assert back.evaluate("el => getComputedStyle(el).outlineStyle") != "none"
+    back.press("Enter")
+    expect(page.get_by_role("heading", name="Frag mich was", exact=True)).to_be_visible(
+        timeout=LOAD_TIMEOUT
+    )
+    page.get_by_text("Über die Suche", exact=True).click()
+    comparison_link = page.locator(".sgb-about").get_by_role(
+        "link", name="Suchmodi vergleichen", exact=True
+    )
+    expect(comparison_link).to_have_attribute("href", "vergleich.html")
+    comparison_link.click()
+    expect(page.get_by_role("heading", name="Suchmodi vergleichen", exact=True)).to_be_visible(
+        timeout=LOAD_TIMEOUT
+    )
+    page.close()
+
+
+def test_comparison_report_failure_is_explained_in_german(
+    context: BrowserContext, site: str
+) -> None:
+    page = context.new_page()
+    page.route(
+        "**/public/comparison.json",
+        lambda route: route.fulfill(status=200, body='{"schema_version":99}'),
+    )
+    page.goto(site + "vergleich.html")
+    expect(page.get_by_role("alert")).to_contain_text(
+        "Der Vergleich ist nicht verfügbar.", timeout=LOAD_TIMEOUT
+    )
+    expect(
+        page.locator(".sgb-brand").get_by_role("link", name="Zur Suche", exact=True)
+    ).to_be_visible()
+    assert page.get_by_role("combobox", name="Beispielfrage", exact=True).count() == 0
+    page.close()

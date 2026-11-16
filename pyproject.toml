@@ -63,14 +63,18 @@ ignore = ["E501"]
 "app.py" = ["B018"]
 "compare.py" = ["B018"]
 
+# PEP 723 notebooks use first-party modules in native sessions.
+[tool.ty.environment]
+extra-paths = ["."]
+
 [tool.pytest.ini_options]
 addopts = "--doctest-modules --cov --cov-fail-under=100 -m 'not browser'"
-testpaths = ["app.py", "scripts", "tests"]
+testpaths = ["app.py", "compare.py", "scripts", "tests"]
 pythonpath = ["."]
 markers = ["browser: needs the exported site in dist/, Playwright browsers, and network access"]
 
 [tool.coverage.run]
-source = ["app", "scripts"]
+source = ["app", "compare", "scripts"]
 
 [tool.coverage.report]
 show_missing = true
