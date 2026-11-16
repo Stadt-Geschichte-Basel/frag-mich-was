@@ -1,4 +1,4 @@
-"""Tests for the mode comparison, the reference table, and the comparison notebook."""
+"""Tests for the mode comparison, its summary, and the comparison notebook."""
 
 import json
 import math
@@ -18,44 +18,23 @@ from app import (
     search,
 )
 from compare import app as compare_app
-from scripts.build_index import (
-    FIXTURE_FILE,
-    INDEX_FILE,
-    MODEL,
-    REFERENCE_QUERY,
-    embed,
-    load_encoder,
-)
+from scripts.build_index import FIXTURE_FILE, INDEX_FILE, MODEL, embed, load_encoder
 from scripts.compare_modes import (
     EXPECTED_TOP,
     MODE_NAMES,
     Comparison,
     ExampleResult,
     RankRow,
-    ReferenceResult,
     compare,
     comparison_items,
-    evaluate,
     evaluate_example,
-    example_rows,
-    filter_examples,
-    format_rank,
-    lexical_excerpts,
     load_comparison,
-    load_reference,
     main,
-    markdown_table,
-    overlap,
-    pass_counts,
     position,
     publication,
-    rank_table,
-    reference_items,
-    reference_table,
     summary_rows,
-    top_keys,
 )
-from scripts.comparison_queries import KIND_NAMES, QUERY_EXAMPLES
+from scripts.comparison_queries import KINDS, QUERY_EXAMPLES, QueryKind
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -78,7 +57,6 @@ def test_missing_publication_has_no_rank() -> None:
     assert position(comparison, "semantic", "b") == 2
     assert position(comparison, "lexical", "a") is None
     assert position(comparison, "combined", "a") is None
-    assert format_rank(position(comparison, "lexical", "a")) == "—"
 
 
 def test_position_uses_the_publication_key() -> None:
@@ -88,78 +66,14 @@ def test_position_uses_the_publication_key() -> None:
     assert position(comparison, "lexical", "docs/x.html") == 1
 
 
-def test_top_keys_and_overlap_respect_the_limit() -> None:
-    chunks = [make(f"p{number}") for number in range(6)]
-    semantic = [(chunk, 1.0) for chunk in chunks]
-    lexical = [(chunk, 1.0) for chunk in reversed(chunks)]
-    comparison = Comparison("q", semantic, lexical, semantic)
-    assert top_keys(comparison, "semantic") == [f"p{number}" for number in range(TOP_K)]
-    # The semantic top five is p0 to p4. The lexical top five is p5 to p1. They share p1 to p4.
-    assert overlap(comparison, "semantic", "lexical") == 4
-    assert overlap(comparison, "semantic", "semantic") == TOP_K
-    assert overlap(comparison, "semantic", "lexical", 6) == 6
-
-
-def test_lexical_excerpts_count_passages_from_the_lexical_ranking() -> None:
-    url = "docs/x.html"
-    semantic_passage, lexical_passage = make("s", url=url), make("l", url=url)
-    other = make("o")
-    semantic = [(semantic_passage, 1.0), (other, 0.5)]
-    combined = [(lexical_passage, 0.1), (other, 0.05)]
-    comparison = Comparison("q", semantic, [(lexical_passage, 1.0)], combined)
-    assert lexical_excerpts(comparison) == 1
-    assert lexical_excerpts(comparison, 0) == 0
-
-
-def test_rank_table_lists_the_union_with_ranks_in_each_mode() -> None:
-    a, b, c = make("a"), make("b"), make("c")
-    comparison = Comparison(
-        "q",
-        [(a, 1.0), (b, 0.9), (c, 0.8)],
-        [(c, 3.0)],
-        [(c, 0.04), (a, 0.03), (b, 0.02)],
-    )
-    rows = rank_table(comparison, 1)
-    assert rows == [
-        RankRow("Titel", "c", 3, 1, 1),
-        RankRow("Titel", "a", 1, None, 2),
-    ]
-    assert [row.key for row in rank_table(comparison, 3)] == ["c", "a", "b"]
-
-
-def test_rank_table_puts_a_publication_that_combined_skips_last() -> None:
-    a, b = make("a"), make("b")
-    comparison = Comparison("q", [(a, 1.0)], [(b, 1.0)], [(a, 0.1)])
-    assert [(row.key, row.combined) for row in rank_table(comparison)] == [("a", 1), ("b", None)]
-
-
-def test_reference_result_passes_only_inside_the_expected_top() -> None:
-    result = ReferenceResult("q", "u", EXPECTED_TOP, EXPECTED_TOP + 1, None, 0, 0, 0)
-    assert result.passes("semantic")
-    assert not result.passes("lexical")
-    assert not result.passes("combined")
-    assert pass_counts([result, result]) == {"semantic": 2, "lexical": 0, "combined": 0}
-
-
-def test_reference_table_has_one_row_for_each_result() -> None:
-    result = ReferenceResult("Frage?", "u", 1, None, 2, 3, 1, 0)
-    lines = reference_table([result, result]).splitlines()
-    assert len(lines) == 4
-    assert lines[2] == "| Frage? | 1 | — | 2 | 3 | 1 | 0 |"
-
-
 # The committed index and the reference vectors.
 
 INDEX = load_index(INDEX_FILE.read_text(encoding="utf-8"))
 FIXTURE = json.loads(FIXTURE_FILE.read_text(encoding="utf-8"))
 LEXICAL = build_lexical_index(INDEX.chunks)
-ITEMS = reference_items(FIXTURE)
 ALL_ITEMS = comparison_items(FIXTURE)
-
-
-def test_reference_items_cover_the_chapter_and_the_story_queries() -> None:
-    assert [item["query"] for item in ITEMS][0] == REFERENCE_QUERY
-    assert len(ITEMS) == 1 + len(FIXTURE["story_references"])
+# The chapter query and the story queries come first.
+REFERENCES = [FIXTURE["reference"], *FIXTURE["story_references"]]
 
 
 @pytest.mark.parametrize("item", ALL_ITEMS, ids=lambda item: item["query"][:30])
@@ -187,62 +101,35 @@ def test_each_ranking_is_complete_and_distinct(item: dict) -> None:
     }
 
 
-@pytest.mark.parametrize("item", ALL_ITEMS, ids=lambda item: item["query"][:30])
-def test_rank_table_matches_each_mode(item: dict) -> None:
-    comparison = compare(item["query"], item["embedding"], LEXICAL)
-    rows = rank_table(comparison)
-    shown = {key for mode in MODE_NAMES for key in top_keys(comparison, mode)}
-    assert {row.key for row in rows} == shown
-    for row in rows:
-        for mode in MODE_NAMES:
-            assert getattr(row, mode) == position(comparison, mode, row.key)
-
-
-def test_evaluate_reports_the_expected_publication() -> None:
-    result = evaluate(ITEMS[0], LEXICAL)
-    assert result.expected_url == ITEMS[0]["expected_url"]
-    assert result.passes("semantic") and result.passes("combined")
-    assert 0 <= result.lexical_excerpts <= TOP_K
-    assert 0 <= result.combined_with_semantic <= TOP_K
-    assert 0 <= result.combined_with_lexical <= TOP_K
-
-
 def test_the_combined_mode_passes_every_reference_query() -> None:
     """The combined ranking must not lose a reference publication that one mode finds."""
-    for item in ITEMS:
-        result = evaluate(item, LEXICAL)
-        assert result.passes("combined"), item["query"]
+    for item in ALL_ITEMS[: len(REFERENCES)]:
+        assert evaluate_example(item, LEXICAL).all_found("combined"), item["query"]
 
 
-def test_main_prints_the_table(capsys: pytest.CaptureFixture[str]) -> None:
+def test_main_prints_the_summary(capsys: pytest.CaptureFixture[str]) -> None:
     main()
     output = capsys.readouterr().out
-    assert output.startswith("| Query |")
-    query_table, rest = output.split("\n\n", 1)
-    assert len(query_table.splitlines()) == len(ALL_ITEMS) + 2
-    assert "Coverage@3" in rest and "All found@5" in rest
-    assert "Cross-source" in rest
-    assert f"top {EXPECTED_TOP}" in output
-
-
-def test_load_reference_matches_the_committed_files() -> None:
-    lexical, items = load_reference()
-    assert len(lexical.chunks) == len(INDEX.chunks)
-    assert items == ITEMS
+    assert output.startswith("| Type | Mode |")
+    assert len(output.split("\n\n")[0].splitlines()) == 2 + 3 * (1 + len(KINDS))
+    assert "| all | combined | 44 | 38 | 41 |" in output
+    assert f"top {EXPECTED_TOP}" not in output and f"is {EXPECTED_TOP} or 5" in output
 
 
 # The notebook.
 
 
 def test_notebook_runs_and_shows_the_reference_results() -> None:
-    _outputs, defs = compare_app.run()
+    outputs, defs = compare_app.run()
     assert {query.query for query in defs["report"].queries} == {
         item["query"] for item in ALL_ITEMS
     }
-    assert defs["selected"] == defs["report"].queries[0]
-    assert defs["kind_filter"].value == defs["topic_filter"].value == "all"
-    assert not defs["misses_only"].value
-    assert "encoder" not in defs["cache"]
+    assert defs["kind_filter"].value == "all"
+    assert defs["filtered"] == defs["report"].queries
+    assert defs["picker"].value == 0
+    texts = [getattr(output, "text", "") for output in outputs]
+    assert any(defs["filtered"][0].query in text for text in texts)
+    assert any("Was der Vergleich zeigt" in text for text in texts)
 
 
 def test_notebook_passes_the_marimo_check() -> None:
@@ -254,17 +141,6 @@ def test_notebook_passes_the_marimo_check() -> None:
         check=False,
     )
     assert check.returncode == 0, check.stdout + check.stderr
-
-
-def test_free_query_encoder_reproduces_the_reference_vector() -> None:
-    """The notebook embeds a free query with the build code. It must match the fixture.
-
-    This test needs the ``index`` dependency group. Without the group, pytest skips it.
-    """
-    pytest.importorskip("sentence_transformers")
-    vector = embed(load_encoder(), [MODEL.query_prefix + REFERENCE_QUERY])[0]
-    reference = FIXTURE["reference"]["embedding"]
-    assert math.sumprod(vector, reference) > 0.999
 
 
 # Expanded examples and measurements. Their retrieval quality is measured, not asserted.
@@ -304,7 +180,7 @@ def test_generated_examples_match_the_catalogue_and_have_valid_vectors() -> None
         check_vector(item["embedding"], MODEL.dimensions)
 
 
-def synthetic_result(kind: str = "cross-source") -> ExampleResult:
+def synthetic_result(kind: QueryKind = "cross-source") -> ExampleResult:
     return ExampleResult(
         Comparison("q", [], [], []),
         "Topic",
@@ -313,52 +189,25 @@ def synthetic_result(kind: str = "cross-source") -> ExampleResult:
     )
 
 
-def test_partial_and_complete_retrieval_use_every_expected_source() -> None:
+def test_complete_retrieval_needs_every_expected_source() -> None:
     result = synthetic_result()
-    assert result.coverage("semantic", 3) == 0.5
-    assert result.coverage("semantic", 5) == 1.0
-    assert result.coverage("lexical", 5) == 0.0
     assert not result.all_found("semantic", 3)
     assert result.all_found("semantic", 5)
+    assert not result.all_found("lexical", 5)
     assert not result.all_found("combined", 5)
-    assert result.coverage("semantic", 0) == 0.0
+    assert not result.all_found("semantic", 0)
 
 
-def test_grouped_coverage_gives_each_query_equal_weight() -> None:
+def test_summary_counts_complete_queries_by_type_and_mode() -> None:
     multi = synthetic_result()
     single = ExampleResult(multi.comparison, "Other", "specific", multi.expected[:1])
     rows = summary_rows([single, multi])
-    semantic = next(
-        row for row in rows if row["Type"] == "All queries" and row["Mode"] == "Semantisch"
-    )
-    assert semantic == {
-        "Type": "All queries",
-        "Mode": "Semantisch",
-        "Queries": 2,
-        "Coverage@3": 0.75,
-        "All found@3": 1,
-        "Coverage@5": 1.0,
-        "All found@5": 2,
-    }
-    assert {row["Type"] for row in rows} == {"All queries", "Specific", "Cross-source"}
+    assert [row for row in rows if row["kind"] == "all" and row["mode"] == "semantic"] == [
+        {"kind": "all", "mode": "semantic", "queries": 2, "complete3": 1, "complete5": 2}
+    ]
+    assert {row["kind"] for row in rows} == {"all", "specific", "cross-source"}
+    assert [row["kind"] for row in rows[:3]] == ["all"] * 3
     assert summary_rows([]) == []
-
-
-def test_filters_combine_type_topic_and_misses_and_preserve_order() -> None:
-    missed = synthetic_result()
-    complete = ExampleResult(
-        Comparison("complete", [], [], []),
-        "Other",
-        "specific",
-        (RankRow("A", "a", 1, 1, 1),),
-    )
-    results = [missed, complete]
-    assert filter_examples(results) == results
-    assert filter_examples(results, misses_only=True) == [missed]
-    assert filter_examples(results, kind="specific") == [complete]
-    assert filter_examples(results, topic="Topic") == [missed]
-    assert filter_examples(results, kind="specific", topic="Topic") == []
-    assert filter_examples(results, kind="specific", topic="Other", misses_only=True) == []
 
 
 def test_evaluator_records_missing_and_skipped_sources_without_passing() -> None:
@@ -375,12 +224,8 @@ def test_evaluator_records_missing_and_skipped_sources_without_passing() -> None
         RankRow("Rhein", "u", 1, None, 1),
         RankRow("absent", "absent", None, None, None),
     )
-    assert result.coverage("semantic") == 0.5
+    assert not result.all_found("semantic")
     assert not result.all_found("combined")
-    row = example_rows([result])[0]
-    assert row["Semantisch"] == "1, — ✗"
-    assert row["Lexikalisch"] == "—, — ✗"
-    assert row["Expected publications"] == "Rhein / absent"
 
 
 @pytest.mark.parametrize("keys", [[], ["u", "u"]])
@@ -389,20 +234,14 @@ def test_evaluator_rejects_empty_or_duplicate_expected_sources(keys: list[str]) 
         evaluate_example({"expected_urls": keys}, LEXICAL)
 
 
-def test_markdown_table_escapes_delimiters_and_newlines() -> None:
-    assert markdown_table([{"Query": "a|b\nc"}]).splitlines()[-1] == r"| a\|b c |"
-    assert markdown_table([]) == "No queries match the filters."
-
-
 def test_load_comparison_matches_the_saved_examples() -> None:
     lexical, items = load_comparison()
     assert len(lexical.chunks) == len(INDEX.chunks)
     assert items == ALL_ITEMS
-    assert {item["expected_url"] for item in items[: len(ITEMS)]} == {
-        item["expected_url"] for item in ITEMS
+    assert {item["expected_url"] for item in items[: len(REFERENCES)]} == {
+        item["expected_url"] for item in REFERENCES
     }
-    assert all(item["kind"] != "reference" for item in items)
-    assert {item["kind"] for item in items} == set(KIND_NAMES)
+    assert {item["kind"] for item in items} == set(KINDS)
 
 
 def test_python_model_reproduces_all_expanded_query_vectors() -> None:
@@ -418,52 +257,18 @@ def test_notebook_shows_both_expected_links_for_a_cross_source_query() -> None:
     from scripts.comparison_report import build_report
 
     query = build_report().queries[-1]
-    outputs, defs = compare_app.run(
-        defs={"filtered": [query], "page_picker": SimpleNamespace(value=0)}
-    )
-    assert defs["selected"] == query
+    outputs, defs = compare_app.run(defs={"filtered": [query], "picker": SimpleNamespace(value=0)})
     texts = [getattr(output, "text", "") for output in outputs]
     assert any("Erwartete Publikationen" in text for text in texts)
+    assert len(query.expected) == 2
     for row in query.expected:
         assert any(row.key in text for text in texts)
-    assert "encoder" not in defs["cache"]
+    assert defs["filtered"] == [query]
 
 
-def test_notebook_handles_filters_with_no_matches() -> None:
+def test_notebook_filters_by_type() -> None:
     from types import SimpleNamespace
 
-    outputs, defs = compare_app.run(
-        defs={
-            "kind_filter": SimpleNamespace(value="synonyms"),
-            "topic_filter": SimpleNamespace(value="Schweizerhalle"),
-            "misses_only": SimpleNamespace(value=False),
-        }
-    )
-    assert defs["filtered"] == []
-    assert "picker" not in defs and "selected" not in defs
-    assert any("Keine Fragen passen" in getattr(output, "text", "") for output in outputs)
-
-
-def test_free_query_reuses_the_encoder_and_clears_expected_source_annotations() -> None:
-    from types import SimpleNamespace
-
-    class Encoder:
-        def encode(
-            self, texts: list[str], *, normalize_embeddings: bool, batch_size: int
-        ) -> list[list[float]]:
-            assert texts == [MODEL.query_prefix + "Rhein"]
-            assert normalize_embeddings and batch_size == 32
-            return [ITEMS[0]["embedding"]]
-
-    cache = {"encoder": Encoder(), "lexical": LEXICAL}
-    outputs, defs = compare_app.run(
-        defs={
-            "free": SimpleNamespace(value=" Rhein "),
-            "picker": None,
-            "cache": cache,
-        }
-    )
-    assert defs["selected"].expected == []
-    assert defs["selected"].query == "Rhein"
-    assert defs["cache"] is cache
-    assert any("keine erwarteten Quellen" in getattr(output, "text", "") for output in outputs)
+    _outputs, defs = compare_app.run(defs={"kind_filter": SimpleNamespace(value="synonyms")})
+    assert defs["filtered"]
+    assert {query.kind for query in defs["filtered"]} == {"synonyms"}

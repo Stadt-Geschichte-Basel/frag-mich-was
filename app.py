@@ -370,14 +370,14 @@ def fuse(
     """
     scores: dict[str, float] = {}
     # The better rank wins. At equal rank, the earlier ranking (semantic) wins.
-    passages: dict[str, tuple[int, int, Chunk]] = {}
-    for order, ranking in enumerate((semantic, lexical)):
+    passages: dict[str, tuple[int, Chunk]] = {}
+    for ranking in (semantic, lexical):
         for position, (chunk, _score) in enumerate(ranking, start=1):
             key = chunk.url or chunk.id
             scores[key] = scores.get(key, 0.0) + 1 / (RRF_K + position)
-            if key not in passages or (position, order) < passages[key][:2]:
-                passages[key] = (position, order, chunk)
-    fused = [(passages[key][2], score) for key, score in scores.items()]
+            if key not in passages or position < passages[key][0]:
+                passages[key] = (position, chunk)
+    fused = [(passages[key][1], score) for key, score in scores.items()]
     fused.sort(key=lambda pair: (-pair[1], pair[0].id))
     return fused[:top_k]
 
@@ -388,7 +388,8 @@ def search(
 ) -> list[tuple[Chunk, float]]:
     """Return up to five distinct publications for the query in the chosen mode.
 
-    The semantic and combined modes need the query vector. The lexical mode does not.
+    The semantic mode needs the query vector. The lexical mode does not.
+    Without the vector, the combined mode falls back to the lexical ranking.
 
     >>> a = Chunk(id="a", title="Basel", text="Der Rhein.", source="a.md", embedding=[1.0])
     >>> index = build_lexical_index([a])
@@ -398,14 +399,16 @@ def search(
     ['a']
     >>> [chunk.id for chunk, _ in search("combined", "Rhein", [1.0], index)]
     ['a']
-    >>> search("combined", "Rhein", None, index)
+    >>> [chunk.id for chunk, _ in search("combined", "Rhein", None, index)]
+    ['a']
+    >>> search("semantic", "Rhein", None, index)
     Traceback (most recent call last):
-    ValueError: The combined mode needs a query vector.
+    ValueError: The semantic mode needs a query vector.
     """
-    if mode == "lexical":
+    if mode == "lexical" or (mode == "combined" and vector is None):
         return lexical_rank(lexical, query)
     if vector is None:
-        raise ValueError(f"The {mode} mode needs a query vector.")
+        raise ValueError("The semantic mode needs a query vector.")
     semantic = rank(vector, lexical.chunks, None)
     if mode == "semantic":
         return semantic[:TOP_K]
@@ -504,23 +507,6 @@ async def vector_for(
         return await query_vector(session, model, query, load)
     except Exception:
         return None
-
-
-@app.function
-def resolve_mode(mode: Mode, vector: Sequence[float] | None) -> tuple[Mode | None, bool]:
-    """Choose the mode to search in. Also say whether the result is degraded.
-
-    Without the vector, the combined mode falls back to the lexical mode, and the semantic
-    mode has no result (``None``).
-
-    >>> resolve_mode("combined", [1.0]), resolve_mode("combined", None)
-    (('combined', False), ('lexical', True))
-    >>> resolve_mode("semantic", None), resolve_mode("lexical", None)
-    ((None, True), ('lexical', False))
-    """
-    if mode == "lexical" or vector is not None:
-        return mode, False
-    return ("lexical" if mode == "combined" else None), True
 
 
 @app.function
@@ -719,9 +705,10 @@ async def _(form, index, lexical, mode, retry, session):
                 )
             )
     _vector = await vector_for(_mode, _query, session, index.model, load_embedder)
-    _search_mode, _degraded = resolve_mode(_mode, _vector)
+    # Without the vector, the combined mode shows lexical results. The semantic mode has none.
+    _model_failed = _vector is None and _mode != "lexical"
     _parts: list[Any] = []
-    if _search_mode is None:
+    if _model_failed and _mode == "semantic":
         _parts.append(
             mo.callout(
                 mo.Html(
@@ -734,7 +721,7 @@ async def _(form, index, lexical, mode, retry, session):
         )
         _parts.append(retry)
     else:
-        if _degraded:
+        if _model_failed:
             _parts.append(
                 mo.callout(
                     mo.Html(
@@ -752,8 +739,7 @@ async def _(form, index, lexical, mode, retry, session):
                 "keine generierten Antworten."
             )
         )
-        _results = search(_search_mode, _query, _vector, lexical)
-        _parts.append(mo.Html(render_results(_results)))
+        _parts.append(mo.Html(render_results(search(_mode, _query, _vector, lexical))))
     mo.output.replace(mo.vstack(_parts))
     return
 

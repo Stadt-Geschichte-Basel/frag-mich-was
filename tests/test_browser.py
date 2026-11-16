@@ -174,6 +174,10 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
         page.locator(".sgb-brand").evaluate("element => getComputedStyle(element).backgroundColor")
         == "rgb(58, 30, 62)"
     )
+    # No white stripe above the purple header.
+    assert (
+        page.locator(".sgb-brand").evaluate("element => element.getBoundingClientRect().top") == 0
+    )
     viewport_width = page.evaluate("window.innerWidth")
     for band in (".sgb-brand", ".sgb-footer"):
         box = page.locator(band).bounding_box()
@@ -620,16 +624,16 @@ def test_comparison_saved_queries_navigation_and_filters(
         page.locator(".sgb-brand").evaluate("el => getComputedStyle(el).backgroundColor")
         == "rgb(58, 30, 62)"
     )
+    assert page.locator(".sgb-brand").evaluate("el => el.getBoundingClientRect().top") == 0
     assert "Euclid Circular B" in page.locator("body").evaluate(
         "el => getComputedStyle(el).fontFamily"
     )
     assert page.get_by_role("textbox").count() == 0
     expect(page.get_by_role("heading", name="Was der Vergleich zeigt", exact=True)).to_be_visible()
-    expect(page.locator(".sgb-insights")).to_contain_text("18 von 18")
     expect(page.locator(".sgb-insights")).to_contain_text("Schweizerhalle")
 
     page.get_by_role("combobox", name="Fragetyp", exact=True).select_option(label="Mehrere Quellen")
-    expect(page.get_by_text("4 Fragen passen zu den Filtern.", exact=False)).to_be_visible()
+    expect(page.get_by_text("4 Fragen passen zum Filter.", exact=False)).to_be_visible()
     reference = FIXTURE["comparison_references"][-1]
     page.get_by_role("combobox", name="Beispielfrage", exact=True).select_option(
         label=reference["query"]
@@ -642,23 +646,20 @@ def test_comparison_saved_queries_navigation_and_filters(
     )
     expect(page.locator(".sgb-comparison-results section")).to_have_count(3)
     assert not any(
-        "embeddings.json" in url or "huggingface" in url or ".onnx" in url or "transformers" in url
+        "embeddings.json" in url
+        or "huggingface" in url
+        or ".onnx" in url
+        or "transformers" in url
+        or "/public/wheels/" in url
         for url in requests
     )
     assert any("/frag-mich-was/public/comparison.json" in url for url in requests)
     assert errors == []
 
-    page.get_by_role("combobox", name="Fragetyp", exact=True).select_option(
-        label="Andere Formulierungen"
-    )
-    page.get_by_role("combobox", name="Thema", exact=True).select_option(label="Schweizerhalle")
-    expect(page.get_by_text("Keine Fragen passen zu den Filtern.", exact=False)).to_be_visible()
-    expect(page.get_by_role("combobox", name="Beispielfrage", exact=True)).to_have_count(0)
     page.get_by_role("combobox", name="Fragetyp", exact=True).select_option(label="Alle")
-    page.get_by_role("combobox", name="Thema", exact=True).select_option(label="Alle")
-    expect(page.get_by_text("44 Fragen passen zu den Filtern.", exact=False)).to_be_visible()
-    page.get_by_role("checkbox", name="Nur Fragen mit fehlenden Quellen in den Top 3").check()
-    expect(page.get_by_text("44 Fragen passen zu den Filtern.", exact=False)).to_have_count(0)
+    expect(page.get_by_text("44 Fragen passen zum Filter.", exact=False)).to_be_visible()
+    assert page.get_by_role("combobox", name="Thema", exact=True).count() == 0
+    assert page.get_by_role("checkbox").count() == 0
 
     page.set_viewport_size({"width": 390, "height": 844})
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")

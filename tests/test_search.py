@@ -27,7 +27,6 @@ from app import (
     load_index,
     query_vector,
     rank,
-    resolve_mode,
     search,
     vector_for,
 )
@@ -208,9 +207,10 @@ def test_search_modes() -> None:
     assert ids(search("lexical", "unbekannt", [1.0], index)) == []
     assert ids(search("semantic", "Fischerei", [1.0], index)) == ["a", "b"]
     assert ids(search("combined", "Fischerei", [1.0], index)) == ["a", "b"]
-    for mode in ("semantic", "combined"):
-        with pytest.raises(ValueError, match="needs a query vector"):
-            search(mode, "Fischerei", None, index)
+    # Without the vector, the combined mode falls back to the lexical ranking.
+    assert ids(search("combined", "Fischerei", None, index)) == ["a"]
+    with pytest.raises(ValueError, match="semantic mode needs a query vector"):
+        search("semantic", "Fischerei", None, index)
 
 
 # The browser orchestration, with a fake model in place of the browser.
@@ -305,20 +305,6 @@ def test_vector_for_returns_the_vector_or_none_when_the_model_fails(mode: Mode) 
 def test_the_browser_model_does_not_load_outside_the_browser() -> None:
     with pytest.raises(RuntimeError, match="WebAssembly"):
         asyncio.run(load_embedder(MODEL_INFO))
-
-
-@pytest.mark.parametrize(
-    ("mode", "has_vector", "expected"),
-    [
-        ("semantic", True, ("semantic", False)),
-        ("combined", True, ("combined", False)),
-        ("lexical", False, ("lexical", False)),
-        ("combined", False, ("lexical", True)),
-        ("semantic", False, (None, True)),
-    ],
-)
-def test_resolve_mode(mode: Mode, has_vector: bool, expected: tuple[Mode | None, bool]) -> None:
-    assert resolve_mode(mode, [1.0] if has_vector else None) == expected
 
 
 # The committed index and the reference vectors.

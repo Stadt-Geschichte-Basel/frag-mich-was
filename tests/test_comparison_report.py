@@ -16,17 +16,14 @@ from compare import (
     expected_html,
     filter_queries,
     format_rank,
-    insights_html,
-    native_free_query,
-    ranks_html,
     results_html,
     safe_source_url,
     summary_html,
     table_html,
 )
 from scripts import comparison_report
-from scripts.build_index import MODEL
-from scripts.compare_modes import MODE_NAMES, evaluate_example, load_comparison, rank_table
+from scripts.compare_modes import MODE_NAMES, evaluate_example, load_comparison
+from scripts.comparison_queries import KINDS
 
 LEXICAL, ITEMS = load_comparison()
 RESULTS = [evaluate_example(item, LEXICAL) for item in ITEMS]
@@ -42,9 +39,6 @@ def test_report_matches_every_saved_ranking_and_omits_embeddings() -> None:
         assert [row.model_dump() for row in query.expected] == [
             asdict(row) for row in result.expected
         ]
-        assert [row.model_dump() for row in query.ranks] == [
-            asdict(row) for row in rank_table(result.comparison)
-        ]
         for mode in MODE_NAMES:
             assert [row.text for row in getattr(query, mode)] == [
                 chunk.text for chunk, _ in result.comparison.ranking(mode)[:5]
@@ -56,8 +50,7 @@ def test_report_matches_every_saved_ranking_and_omits_embeddings() -> None:
     assert len(encoded.encode()) < 1_000_000
     assert ComparisonReport.model_validate_json(encoded) == REPORT
     assert comparison_report.build_report(RESULTS) == REPORT
-    assert REPORT.summary[0].coverage3 == pytest.approx(0.8977272727)
-    assert REPORT.summary[2].complete5 == 41
+    assert (REPORT.summary[0].complete3, REPORT.summary[2].complete5) == (38, 41)
 
 
 @pytest.mark.parametrize(
@@ -105,15 +98,14 @@ def test_saved_queries_need_distinct_expected_sources_and_positive_ranks() -> No
         QueryReport.model_validate(data | {"combined": data["combined"] * 2})
 
 
-def test_report_filters_combine_topics_types_and_misses() -> None:
+def test_report_filter_selects_one_type_and_keeps_the_order() -> None:
     queries = REPORT.queries
     assert filter_queries(queries) == queries
-    assert len(filter_queries(queries, kind="cross-source")) == 4
-    assert len(filter_queries(queries, topic="Schweizerhalle")) == 2
-    assert filter_queries(queries, kind="synonyms", topic="Schweizerhalle") == []
-    missed = filter_queries(queries, misses_only=True)
-    assert missed and len(missed) < len(queries)
-    assert all(any(not all_found(query, mode) for mode in MODE_NAMES) for query in missed)
+    cross = filter_queries(queries, kind="cross-source")
+    assert len(cross) == 4 and all(query.kind == "cross-source" for query in cross)
+    assert filter_queries(queries, kind="synonyms") == [
+        query for query in queries if query.kind == "synonyms"
+    ]
     absent = REPORT.queries[0].expected[0].model_copy(update={"lexical": None})
     query = REPORT.queries[0].model_copy(update={"expected": [absent]})
     assert not all_found(query, "lexical")
@@ -148,77 +140,27 @@ def test_html_renderers_escape_sources_questions_and_attributes() -> None:
     assert "<img>" not in expected_html(query)
     assert "&quot;&amp;y=2" in expected_html(query)
     assert 'target="_blank" rel="noopener noreferrer"' in expected_html(query)
-    assert "<img>" not in ranks_html([row], "Ränge")
-    assert "89,8%" in summary_html(REPORT.summary)
     assert "Alle Fragen" in summary_html(REPORT.summary)
+    assert "38 von 44" in summary_html(REPORT.summary)
     assert "Mehrere Quellen" in summary_html(REPORT.summary)
 
 
-def test_local_free_queries_load_and_reuse_optional_dependencies(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[str] = []
-
-    class Encoder:
-        def encode(
-            self, texts: list[str], *, normalize_embeddings: bool, batch_size: int
-        ) -> list[list[float]]:
-            assert texts == [MODEL.query_prefix + "Rhein"]
-            assert normalize_embeddings and batch_size == 32
-            return [ITEMS[0]["embedding"]]
-
-    def load() -> Encoder:
-        calls.append("model")
-        return Encoder()
-
-    def lexical() -> tuple[Any, list[Any]]:
-        calls.append("index")
-        return LEXICAL, []
-
-    monkeypatch.setattr(comparison_report, "load_encoder", load)
-    monkeypatch.setattr(comparison_report, "load_comparison", lexical)
-    cache: dict[str, Any] = {}
-    first = native_free_query("Rhein", cache)
-    second = native_free_query("Rhein", cache)
-    assert first == second
-    assert first.kind == "free" and first.expected == []
-    assert calls == ["index", "model"]
-    assert not all_found(first, "semantic")
-    assert "keine erwarteten Quellen" in expected_html(first)
-
-
-def test_insights_use_report_counts_and_a_measured_ranking_loss() -> None:
-    output = insights_html(REPORT)
-    assert "Was der Vergleich zeigt" in output
-    assert "18 von 18" in output
-    assert "8 von 9" in output and "4 von 9" in output
-    assert "Schweizerhalle" in output and "Rang 2" in output and "Rang 8" in output
-    assert "bei 3 von 4" in output
-    assert "44 ausgewählten Beispiele" in output
-    assert insights_html(REPORT.model_copy(update={"summary": [], "queries": []})) == ""
-    changed = REPORT.model_copy(
-        update={
-            "summary": [
-                row.model_copy(update={"complete3": 0, "complete5": 0}) for row in REPORT.summary
-            ],
-            "queries": [
-                REPORT.queries[0].model_copy(
-                    update={
-                        "topic": "<img>",
-                        "expected": [
-                            REPORT.queries[0]
-                            .expected[0]
-                            .model_copy(update={"semantic": 2, "combined": 8})
-                        ],
-                    }
-                )
-            ],
-        }
+def test_the_static_insights_of_the_page_match_the_report() -> None:
+    """The page states these findings in prose. The report must still support them."""
+    by_kind = {(row.kind, row.mode): row for row in REPORT.summary}
+    specific = [by_kind["specific", mode] for mode in MODE_NAMES]
+    assert all(row.complete3 == row.queries for row in specific)
+    synonyms = {mode: by_kind["synonyms", mode].complete3 for mode in MODE_NAMES}
+    assert synonyms["lexical"] < synonyms["semantic"] and synonyms["lexical"] < synonyms["combined"]
+    schweizerhalle = next(
+        source
+        for query in REPORT.queries
+        if query.topic == "Schweizerhalle" and query.kind == "complex"
+        for source in query.expected
     )
-    altered = insights_html(changed)
-    assert "18 von 18" not in altered and "0 von 9" in altered
-    assert "<img>" not in altered and "&lt;img&gt;" in altered
-    assert "1 ausgewählten Beispiele" in altered
+    assert (schweizerhalle.semantic, schweizerhalle.combined) == (2, 8)
+    cross = {mode: by_kind["cross-source", mode].complete5 for mode in MODE_NAMES}
+    assert cross["combined"] > cross["semantic"] and cross["combined"] > cross["lexical"]
 
 
 def test_public_categories_describe_intent_without_regression_cohorts() -> None:
@@ -226,7 +168,6 @@ def test_public_categories_describe_intent_without_regression_cohorts() -> None:
     from collections import Counter
 
     from scripts.build_index import FIXTURE_FILE
-    from scripts.compare_modes import reference_items
     from scripts.comparison_queries import REFERENCE_KINDS
 
     assert Counter(query.kind for query in REPORT.queries) == {
@@ -236,14 +177,9 @@ def test_public_categories_describe_intent_without_regression_cohorts() -> None:
         "cross-source": 4,
     }
     fixture = json.loads(FIXTURE_FILE.read_text())
-    assert set(REFERENCE_KINDS) == {item["expected_url"] for item in reference_items(fixture)}
-    assert {row.kind for row in REPORT.summary} == {
-        "all",
-        "specific",
-        "synonyms",
-        "complex",
-        "cross-source",
-    }
+    originals = [fixture["reference"], *fixture["story_references"]]
+    assert set(REFERENCE_KINDS) == {item["expected_url"] for item in originals}
+    assert {row.kind for row in REPORT.summary} == {"all", *KINDS}
     assert [query.topic.casefold() for query in REPORT.queries] == sorted(
         query.topic.casefold() for query in REPORT.queries
     )

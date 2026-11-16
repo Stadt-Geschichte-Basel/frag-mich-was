@@ -63,10 +63,6 @@ ignore = ["E501"]
 "app.py" = ["B018"]
 "compare.py" = ["B018"]
 
-# PEP 723 notebooks use first-party modules in native sessions.
-[tool.ty.environment]
-extra-paths = ["."]
-
 [tool.pytest.ini_options]
 addopts = "--doctest-modules --cov --cov-fail-under=100 -m 'not browser'"
 testpaths = ["app.py", "compare.py", "scripts", "tests"]

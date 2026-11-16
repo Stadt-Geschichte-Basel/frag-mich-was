@@ -56,6 +56,9 @@ body {
   gap: 1rem;
 }
 .sgb-brand { margin-bottom: 2rem; }
+/* Start the page at the purple header. Remove marimo's top spacer and the output margin above it. */
+.mathjax_ignore > [class*="pt-8"] { padding-top: 0; }
+.marimo-cell.published .output:has(.sgb-brand) { margin-top: 0; }
 .sgb-brand img {
   display: block;
   width: 180px;
@@ -205,11 +208,11 @@ a, button, input, select, summary {
 }
 
 /* Comparison tables and result columns use the same SGB tokens as the search. */
-.sgb-table-scroll { overflow-x: auto; max-width: 100%; margin-block: 1rem 2rem; }
+.sgb-table-scroll { overflow: auto; max-width: 100%; max-height: 36rem; margin-block: 1rem 2rem; }
 .sgb-table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
 .sgb-table caption { text-align: left; font-weight: 600; margin-bottom: 0.75rem; color: var(--sgb-purple); }
 .sgb-table th, .sgb-table td { border-bottom: 1px solid #d7cdd8; padding: 0.65rem; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
-.sgb-table th { color: var(--sgb-purple); background: #f8f5f9; }
+.sgb-table th { color: var(--sgb-purple); background: #f8f5f9; position: sticky; top: 0; }
 .sgb-table tbody tr:nth-child(even) { background: #faf9fa; }
 .sgb-expected { padding-left: 1.3rem; }
 .sgb-expected li { margin-block: 1rem; line-height: 1.65; }

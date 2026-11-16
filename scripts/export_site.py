@@ -68,6 +68,8 @@ def main() -> None:
         )
         path = ROOT / "dist" / filename
         path.write_text(prepare_html(path.read_text(encoding="utf-8")), encoding="utf-8")
+    if any((ROOT / "dist" / "public" / "wheels").glob("*.whl")):
+        raise ValueError("Local Python wheels must not enter the site export.")
     report = build_report()
     report_path = ROOT / "dist" / "public" / "comparison.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)

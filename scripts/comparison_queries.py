@@ -5,15 +5,10 @@
 """
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, get_args
 
 QueryKind = Literal["specific", "synonyms", "complex", "cross-source"]
-KIND_NAMES = {
-    "specific": "Specific",
-    "synonyms": "Synonyms",
-    "complex": "Complex",
-    "cross-source": "Cross-source",
-}
+KINDS: tuple[QueryKind, ...] = get_args(QueryKind)
 
 # Each source note names a passage or section that supports the expected publication.
 # These are supported sources, not an exhaustive judgement of every relevant result.

@@ -14,18 +14,18 @@ app = marimo.App(
 
 with app.setup:
     import html
-    import importlib.util
+    import importlib
     import sys
     from collections.abc import Sequence
-    from typing import Any, Literal
+    from typing import Literal
     from urllib.parse import urlsplit
 
     import marimo as mo
-    from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, field_validator, model_validator
+    from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
     IS_WASM = sys.platform == "emscripten"
     Mode = Literal["semantic", "lexical", "combined"]
-    Kind = Literal["specific", "synonyms", "complex", "cross-source", "free"]
+    Kind = Literal["specific", "synonyms", "complex", "cross-source"]
     MODE_NAMES: dict[Mode, str] = {
         "semantic": "Semantisch",
         "lexical": "Lexikalisch",
@@ -36,9 +36,7 @@ with app.setup:
         "synonyms": "Andere Formulierungen",
         "complex": "Erklärende Fragen",
         "cross-source": "Mehrere Quellen",
-        "free": "Freie Eingabe",
     }
-    MODEL_AVAILABLE = not IS_WASM and importlib.util.find_spec("sentence_transformers") is not None
 
 
 @app.class_definition
@@ -119,43 +117,35 @@ class QueryReport(ReportModel):
     topic: str = Field(min_length=1)
     kind: Kind
     expected: list[PublicationRanks]
-    ranks: list[PublicationRanks]
     semantic: list[DisplayPassage] = Field(max_length=5)
     lexical: list[DisplayPassage] = Field(max_length=5)
     combined: list[DisplayPassage] = Field(max_length=5)
-    publications: int = Field(ge=0)
-    lexical_matches: int = Field(ge=0)
-    semantic_overlap: int = Field(ge=0, le=5)
-    lexical_overlap: int = Field(ge=0, le=5)
-    lexical_excerpts: int = Field(ge=0, le=5)
 
     @model_validator(mode="after")
     def expected_sources(self) -> QueryReport:
-        """Require distinct expected sources for saved queries.
+        """Require distinct expected sources.
 
         >>> callable(QueryReport.expected_sources)
         True
         """
         keys = [row.key for row in self.expected]
-        if (self.kind != "free" and not keys) or len(set(keys)) != len(keys):
+        if not keys or len(set(keys)) != len(keys):
             raise ValueError("Expected sources must be nonempty and distinct.")
         return self
 
 
 @app.class_definition
 class SummaryRow(ReportModel):
-    """Retrieval measurements for a group and mode.
+    """The number of queries of a group that a mode answers completely.
 
-    >>> SummaryRow.model_fields["coverage3"].is_required()
+    >>> SummaryRow.model_fields["complete3"].is_required()
     True
     """
 
     kind: Literal["all", "specific", "synonyms", "complex", "cross-source"]
     mode: Mode
     queries: int = Field(gt=0)
-    coverage3: FiniteFloat = Field(ge=0, le=1)
     complete3: int = Field(ge=0)
-    coverage5: FiniteFloat = Field(ge=0, le=1)
     complete5: int = Field(ge=0)
 
 
@@ -189,30 +179,19 @@ def all_found(query: QueryReport, mode: Mode, limit: int = 3) -> bool:
     >>> callable(all_found)
     True
     """
-    return bool(query.expected) and all(
+    return all(
         (place := getattr(row, mode)) is not None and place <= limit for row in query.expected
     )
 
 
 @app.function
-def filter_queries(
-    queries: Sequence[QueryReport],
-    kind: str = "all",
-    topic: str = "all",
-    misses_only: bool = False,
-) -> list[QueryReport]:
-    """Filter saved queries while preserving their order.
+def filter_queries(queries: Sequence[QueryReport], kind: str = "all") -> list[QueryReport]:
+    """Select the saved queries of one type while preserving their order.
 
     >>> filter_queries([])
     []
     """
-    return [
-        query
-        for query in queries
-        if (kind == "all" or query.kind == kind)
-        and (topic == "all" or query.topic == topic)
-        and (not misses_only or any(not all_found(query, mode) for mode in MODE_NAMES))
-    ]
+    return [query for query in queries if kind == "all" or query.kind == kind]
 
 
 @app.function
@@ -235,28 +214,12 @@ def table_html(headers: Sequence[str], rows: Sequence[Sequence[str]], caption: s
 
 
 @app.function
-def ranks_html(rows: Sequence[PublicationRanks], caption: str) -> str:
-    """Show publication titles and their ranks.
-
-    >>> ranks_html([], "Ränge").count("<caption>")
-    1
-    """
-    return table_html(
-        ["Publikation", *MODE_NAMES.values()],
-        [[row.title, *(format_rank(getattr(row, mode)) for mode in MODE_NAMES)] for row in rows],
-        caption,
-    )
-
-
-@app.function
 def expected_html(query: QueryReport) -> str:
     """Link each expected source with its individual ranks.
 
     >>> callable(expected_html)
     True
     """
-    if not query.expected:
-        return "<p>Für freie Eingaben sind keine erwarteten Quellen festgelegt.</p>"
     items = []
     for row in query.expected:
         ranks = " · ".join(
@@ -298,29 +261,19 @@ def results_html(passages: Sequence[DisplayPassage]) -> str:
 
 @app.function
 def summary_html(rows: Sequence[SummaryRow]) -> str:
-    """Format percentages and complete-query counts in German.
+    """Show the number of complete queries for each type and mode.
 
     >>> callable(summary_html)
     True
     """
     return table_html(
-        [
-            "Fragetyp",
-            "Suchmodus",
-            "Fragen",
-            "Abdeckung@3",
-            "Vollständig@3",
-            "Abdeckung@5",
-            "Vollständig@5",
-        ],
+        ["Fragetyp", "Suchmodus", "Fragen", "Vollständig@3", "Vollständig@5"],
         [
             [
                 "Alle Fragen" if row.kind == "all" else KIND_NAMES[row.kind],
                 MODE_NAMES[row.mode],
                 str(row.queries),
-                f"{row.coverage3:.1%}".replace(".", ","),
                 f"{row.complete3} von {row.queries}",
-                f"{row.coverage5:.1%}".replace(".", ","),
                 f"{row.complete5} von {row.queries}",
             ]
             for row in rows
@@ -357,94 +310,16 @@ def catalogue_html(queries: Sequence[QueryReport]) -> str:
 
 
 @app.function
-def insights_html(report: ComparisonReport) -> str:
-    """Explain measured differences without extending claims beyond the examples.
-
-    >>> callable(insights_html)
-    True
-    """
-    rows = {(row.kind, row.mode): row for row in report.summary}
-    items: list[str] = []
-    specific = [row for row in report.summary if row.kind == "specific"]
-    if len(specific) == 3 and all(row.complete3 == row.queries for row in specific):
-        count = specific[0].queries
-        items.append(
-            f"<strong>Gezielte Suchanfragen führen zuverlässig zur Quelle.</strong> "
-            f"Alle drei Suchmodi finden bei {count} von {count} gezielten Suchanfragen "
-            "die erwartete Publikation unter den ersten drei Treffern."
-        )
-    if all(("synonyms", mode) in rows for mode in MODE_NAMES):
-        semantic = rows["synonyms", "semantic"]
-        lexical = rows["synonyms", "lexical"]
-        combined = rows["synonyms", "combined"]
-        items.append(
-            "<strong>Die Wortwahl macht einen Unterschied.</strong> Bei anderen Formulierungen "
-            f"findet «Semantisch» die erwartete Quelle in {semantic.complete3} von {semantic.queries} Fällen "
-            f"unter den ersten drei Treffern, «Lexikalisch» in {lexical.complete3} von {lexical.queries} "
-            f"und «Kombiniert» in {combined.complete3} von {combined.queries}."
-        )
-    dropped = next(
-        (
-            (query, source)
-            for query in report.queries
-            for source in query.expected
-            if source.semantic is not None
-            and source.semantic <= 3
-            and source.combined is not None
-            and source.combined > 5
-        ),
-        None,
-    )
-    if dropped is not None:
-        query, source = dropped
-        items.append(
-            "<strong>Kombiniert verbessert nicht jede Anfrage.</strong> "
-            f"Bei einer Frage zu «{html.escape(query.topic)}» rückt die erwartete Quelle "
-            f"von Rang {source.semantic} in der semantischen Suche auf Rang {source.combined} "
-            "in der kombinierten Suche."
-        )
-    if all(("cross-source", mode) in rows for mode in MODE_NAMES):
-        semantic = rows["cross-source", "semantic"]
-        lexical = rows["cross-source", "lexical"]
-        combined = rows["cross-source", "combined"]
-        items.append(
-            "<strong>Bei mehreren Quellen zählt die Vollständigkeit.</strong> "
-            f"«Kombiniert» findet bei {combined.complete5} von {combined.queries} publikationsübergreifenden Fragen "
-            "beide erwarteten Quellen unter den ersten fünf Treffern. "
-            f"«Semantisch» gelingt dies bei {semantic.complete5}, «Lexikalisch» bei {lexical.complete5}."
-        )
-    if not items:
-        return ""
-    return (
-        '<section class="sgb-insights" aria-labelledby="comparison-insights">'
-        '<h2 id="comparison-insights">Was der Vergleich zeigt</h2><ul>'
-        + "".join(f"<li>{item}</li>" for item in items)
-        + f"</ul><p>Die Aussagen gelten für diese {len(report.queries)} ausgewählten Beispiele.</p></section>"
-    )
-
-
-@app.function
 def native_report() -> ComparisonReport:
     """Build the same report for a local notebook session.
 
     >>> callable(native_report)
     True
     """
-    from scripts.comparison_report import build_report
-
-    return ComparisonReport.model_validate_json(build_report().model_dump_json())
-
-
-@app.function
-def native_free_query(query: str, cache: dict[str, Any]) -> QueryReport:
-    """Keep optional model access within the local session.
-
-    >>> callable(native_free_query)
-    True
-    """
-    from scripts.comparison_report import free_query_report
-
-    return QueryReport.model_validate_json(free_query_report(query, cache).model_dump_json())
+    # Resolve optional native helpers only when a local session calls this function.
+    # A static import makes the WASM exporter bundle build tools into local wheels.
+    builder = importlib.import_module("scripts.comparison_report").build_report
+    return ComparisonReport.model_validate_json(builder().model_dump_json())
 
 
 @app.cell
@@ -507,7 +382,27 @@ def _(report):
 @app.cell
 def _(report):
     mo.stop(report is None)
-    mo.Html(insights_html(report))
+    # These statements describe the saved examples. A test checks them against the report.
+    mo.Html(
+        """
+    <section class="sgb-insights" aria-labelledby="comparison-insights">
+    <h2 id="comparison-insights">Was der Vergleich zeigt</h2>
+    <ul>
+    <li><strong>Gezielte Suchanfragen führen zuverlässig zur Quelle.</strong>
+    Alle drei Suchmodi finden bei Namen, Orten, Jahreszahlen und Fachbegriffen die erwartete Publikation.</li>
+    <li><strong>Die Wortwahl macht einen Unterschied.</strong>
+    Bei anderen Formulierungen findet «Lexikalisch» die erwartete Quelle deutlich seltener
+    als «Semantisch» und «Kombiniert».</li>
+    <li><strong>Kombiniert verbessert nicht jede Anfrage.</strong>
+    Bei der Frage zu Schweizerhalle rückt die erwartete Quelle von Rang 2 in der semantischen Suche
+    auf Rang 8 in der kombinierten Suche.</li>
+    <li><strong>Bei mehreren Quellen zählt die Vollständigkeit.</strong>
+    «Kombiniert» findet beide erwarteten Quellen am häufigsten unter den ersten fünf Treffern.</li>
+    </ul>
+    <p>Die Aussagen gelten für diese Beispiele. Die Tabelle unten zeigt die Zahlen.</p>
+    </section>
+    """
+    )
     return
 
 
@@ -519,10 +414,9 @@ def _(report):
             mo.md("""
         ## Ergebnisse nach Fragetyp
 
-        **Abdeckung@3** zeigt den mittleren Anteil erwarteter Quellen unter den ersten drei Treffern.
-        Jede Frage zählt gleich viel. Eine von zwei Quellen ergibt 50 Prozent Abdeckung.
         **Vollständig@3** zählt Fragen, bei denen alle erwarteten Quellen unter den ersten drei Treffern stehen.
-        Die Werte mit **@5** beziehen sich auf die ersten fünf Treffer.
+        **Vollständig@5** zählt Fragen, bei denen alle erwarteten Quellen unter den ersten fünf Treffern stehen.
+        Eine von zwei Quellen genügt nicht.
 
         Die Beispiele zeigen auch Fälle, bei denen Quellen fehlen oder weiter hinten stehen.
         """),
@@ -538,131 +432,56 @@ def _(report):
     kind_filter = mo.ui.dropdown(
         options={
             "Alle": "all",
-            **{label: kind for kind, label in KIND_NAMES.items() if kind != "free"},
+            **{
+                label: kind
+                for kind, label in KIND_NAMES.items()
+                if any(query.kind == kind for query in report.queries)
+            },
         },
         value="Alle",
         label="Fragetyp",
     )
-    topic_filter = mo.ui.dropdown(
-        options={"Alle": "all", **{query.topic: query.topic for query in report.queries}},
-        value="Alle",
-        label="Thema",
-    )
-    misses_only = mo.ui.checkbox(label="Nur Fragen mit fehlenden Quellen in den Top 3")
-    mo.vstack(
-        [mo.md("## Beispielfragen"), mo.hstack([kind_filter, topic_filter], wrap=True), misses_only]
-    )
-    return kind_filter, misses_only, topic_filter
+    mo.vstack([mo.md("## Beispielfragen"), kind_filter])
+    return (kind_filter,)
 
 
 @app.cell
-def _(kind_filter, misses_only, report, topic_filter):
+def _(kind_filter, report):
     mo.stop(report is None)
-    filtered = filter_queries(
-        report.queries, kind_filter.value, topic_filter.value, misses_only.value
-    )
-    _pages = max(1, (len(filtered) + 9) // 10)
-    page_picker = mo.ui.dropdown(
-        options={f"{number + 1} von {_pages}": number for number in range(_pages)},
-        value=f"1 von {_pages}",
-        label="Seite",
-    )
-    mo.vstack(
-        [
-            mo.md(f"""
-        **{len(filtered)} Fragen passen zu den Filtern.**
-        Die Ränge folgen der Reihenfolge der erwarteten Publikationen.
-        Ein Häkchen bedeutet: Alle erwarteten Quellen stehen in den Top 3.
-        Ein Strich bedeutet: Der Suchmodus findet diese Quelle nicht.
-        Der Filter für fehlende Quellen berücksichtigt alle drei Suchmodi.
-        """),
-            page_picker
-            if filtered
-            else mo.md(
-                "Keine Fragen passen zu den Filtern. Ändere Fragetyp, Thema oder Quellenfilter."
-            ),
-        ]
-    )
-    return filtered, page_picker
-
-
-@app.cell
-def _(filtered, page_picker):
-    mo.stop(not filtered)
-    _start = page_picker.value * 10
-    mo.Html(catalogue_html(filtered[_start : _start + 10]))
-    return
-
-
-@app.cell
-def _(filtered):
-    mo.stop(not filtered)
+    filtered = filter_queries(report.queries, kind_filter.value)
     picker = mo.ui.dropdown(
         options={query.query: number for number, query in enumerate(filtered)},
         value=filtered[0].query,
         label="Beispielfrage",
         full_width=True,
     )
-    free = mo.ui.text(
-        label="Freie Eingabe (mit Enter bestätigen)",
-        full_width=True,
-        disabled=not MODEL_AVAILABLE,
-        placeholder="Rhein und Handel in Basel",
-    )
     mo.vstack(
         [
+            mo.md(f"""
+        **{len(filtered)} Fragen passen zum Filter.**
+        Die Ränge folgen der Reihenfolge der erwarteten Publikationen.
+        Ein Häkchen bedeutet: Alle erwarteten Quellen stehen in den Top 3.
+        Ein Strich bedeutet: Der Suchmodus findet diese Quelle nicht.
+        """),
+            mo.Html(catalogue_html(filtered)),
             mo.md("## Eine Frage in drei Suchmodi"),
             picker,
-            *(
-                []
-                if IS_WASM
-                else [
-                    mo.md("Freie Eingaben benötigen lokal die Abhängigkeitsgruppe `index`."),
-                    free,
-                ]
-            ),
         ]
     )
-    return free, picker
+    return filtered, picker
 
 
 @app.cell
-def _():
-    cache: dict[str, Any] = {}
-    return (cache,)
-
-
-@app.cell
-def _(cache, filtered, free, picker):
-    _text = free.value.strip() if not IS_WASM else ""
-    selected = native_free_query(_text, cache) if _text else filtered[picker.value]
-    return (selected,)
-
-
-@app.cell
-def _(selected):
+def _(filtered, picker):
+    _selected = filtered[picker.value]
     mo.vstack(
         [
-            mo.md("### Erwartete Publikationen"),
-            mo.Html(expected_html(selected)),
-            mo.md(f"""
-        **Suchanfrage:** {selected.query}
-
-        - Die lexikalische Suche findet {selected.lexical_matches} von {selected.publications} Publikationen.
-        - Die kombinierten Top 5 teilen {selected.semantic_overlap} Publikationen mit den semantischen Top 5
-          und {selected.lexical_overlap} mit den lexikalischen Top 5.
-        - {selected.lexical_excerpts} kombinierte Textstellen stammen aus der lexikalischen Rangliste
-          und unterscheiden sich von der besten semantischen Textstelle derselben Publikation.
-        """),
-            mo.Html(
-                ranks_html(
-                    selected.ranks, "Ränge der Publikationen, die mindestens ein Suchmodus zeigt"
-                )
-            ),
+            mo.md(f"### Erwartete Publikationen\n\n**Suchanfrage:** {_selected.query}"),
+            mo.Html(expected_html(_selected)),
             mo.Html(
                 '<div class="sgb-comparison-results">'
                 + "".join(
-                    f'<section aria-label="{name}"><h2>{name}</h2>{results_html(getattr(selected, mode))}</section>'
+                    f'<section aria-label="{name}"><h2>{name}</h2>{results_html(getattr(_selected, mode))}</section>'
                     for mode, name in MODE_NAMES.items()
                 )
                 + "</div>"

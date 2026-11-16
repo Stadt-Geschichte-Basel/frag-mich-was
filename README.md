@@ -130,8 +130,7 @@ The page uses Swiss Standard German and the same SGB design as the search. **Zur
 
 ```bash
 uv run marimo edit compare.py                 # Opens the saved examples. No model is needed.
-uv run --group index marimo edit compare.py   # Enables free queries with the Python model.
-uv run python -m scripts.compare_modes        # Prints the query table and summaries.
+uv run python -m scripts.compare_modes        # Prints the summary.
 ```
 
 The catalogue covers all nine volumes and all seven Data Stories.
@@ -147,48 +146,43 @@ Paired variants let users compare different words for the same topic.
 For example, “Erbleihe, Ehrschatz und Grundzins bei Basler Häusern” has this variant:
 “Weshalb mussten Hauseigentümer in Basel Geld an geistliche Institutionen zahlen, obwohl sie ihre Liegenschaften verkaufen konnten?”
 
-The page starts with **Was der Vergleich zeigt**. It draws its counts and ranking examples from the report.
+The page starts with **Was der Vergleich zeigt**. This text is static.
+`tests/test_comparison_report.py` checks that the report still supports each statement.
 The conclusions apply to the 44 selected examples.
 
-The notebook shows summaries by query type. Filters select a type, a topic, or queries with a miss in any mode's top three.
+The notebook shows a summary by query type. A filter selects one query type.
 The query table shows the rank of each expected publication. Ranks follow the source order in the table.
 A tick requires every expected publication in the top three. A dash means that the mode skips a publication.
-
 The selected query shows linked expected sources, individual ranks, and all three result lists side by side.
 Narrow screens stack the result lists. Tables wrap long questions and publication titles.
-It also shows ranking overlaps and the origin of combined excerpts.
 
-Free queries are available only in local sessions with the `index` dependency group. They have no expected-source annotation.
-The published page provides the 44 saved examples. It downloads neither the search index nor an embedding model.
-
-**Abdeckung@k** is the mean fraction of expected sources found in the first k results, calculated separately for each query.
-Each query has equal weight. **Vollständig@k** counts queries with every expected source in the first k results.
-A question with one of its two sources retrieved has 50 percent coverage. It does not count as complete.
-The summaries report both measures for the first three and first five results.
+**Vollständig@k** counts queries with every expected source in the first k results.
+A question with one of its two sources retrieved does not count as complete.
+The summary reports the first three and the first five results.
 
 Expected sources identify supported publications. Other results can also be relevant. The catalogue is not an exhaustive relevance judgement.
 
 The committed index and vectors gave these results on 2026-11-16:
 
-| Mode | Vollständig@3 | Abdeckung@3 | Vollständig@5 | Abdeckung@5 |
-| --- | --- | --- | --- | --- |
-| Semantisch | 38 of 44 | 89.8% | 40 of 44 | 93.2% |
-| Lexikalisch | 31 of 44 | 72.7% | 34 of 44 | 80.7% |
-| Kombiniert | 38 of 44 | 88.6% | 41 of 44 | 94.3% |
+| Mode | Vollständig@3 | Vollständig@5 |
+| --- | --- | --- |
+| Semantisch | 38 of 44 | 40 of 44 |
+| Lexikalisch | 31 of 44 | 34 of 44 |
+| Kombiniert | 38 of 44 | 41 of 44 |
 
 All modes find the 18 targeted queries in the top three.
 For alternative wording, semantic and combined modes each find eight of nine. Lexical search finds four.
 For explanatory questions, semantic and combined search each find eleven of thirteen. Lexical search finds nine.
-For cross-source questions, semantic and combined modes each find both sources once in four queries. Lexical search completes none.
+For cross-source questions in the top five, combined search completes three of four queries. Semantic search completes two. Lexical search completes one.
 These examples show that combined search can lower a source's rank.
 The Schweizerhalle paraphrase ranks its expected source second semantically and eighth in combined mode.
 
-Eight established queries retain their regression checks. The public page classifies them by search intent, like every other query.
+Eight established queries keep their regression checks. The public page classifies them by search intent, like every other query.
 The other examples have no retrieval success threshold.
-They check source evidence, vectors, metrics, filters, and agreement with the application.
+They check source evidence, vectors, the summary, the filter, and agreement with the application.
 `scripts/compare_modes.py` holds the comparison logic. `tests/test_compare.py` checks it.
 Model-enabled tests reproduce every new query vector with the pinned Python model.
-Browser tests check both pages, navigation, filters, source links, failure messages, and narrow layouts in Chromium and Firefox.
+Browser tests check both pages, navigation, the filter, source links, failure messages, and narrow layouts in Chromium and Firefox.
 
 After a catalogue change, regenerate the fixture:
 
@@ -200,9 +194,10 @@ This command preserves the passage index. The full index build also generates th
 
 The site export calculates all saved rankings with the committed index and vectors.
 It writes the validated report to `dist/public/comparison.json` and exports the comparison to `dist/vergleich.html`.
-The report contains query types, summaries, source ranks, ranking overlaps, and result excerpts. It contains no embeddings.
+The report contains query types, summaries, source ranks, and result excerpts. It contains no embeddings.
 The browser validates the report with Pydantic and uses `pyfetch` to load it.
-The comparison uses only the standard library, marimo, and Pydantic in the browser. Local helpers stay outside the deployed runtime.
+The published page downloads neither the search index nor an embedding model.
+The comparison uses only the standard library, marimo, and Pydantic in the browser. Local helpers load only in native sessions. The export rejects bundled local Python wheels.
 
 Both pages share the existing assets. CI requires both HTML files and the report before it uploads the Pages artifact.
 Production deployment follows the existing workflow on `main` after the PR is merged.
