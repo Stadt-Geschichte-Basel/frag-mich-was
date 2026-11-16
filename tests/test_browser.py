@@ -7,10 +7,13 @@ These tests need the export in ``dist/``, the Playwright browsers, and network a
     uv run pytest -m browser --no-cov
 """
 
+import importlib.metadata
 import json
 import math
+import sys
 import threading
 import time
+import tomllib
 from collections.abc import Iterator
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -546,3 +549,50 @@ def test_modes_keep_the_query_and_work_without_the_model(
     assert field.input_value() == "Merian"
     assert not errors
     fresh.close()
+
+
+def test_local_versions_match_the_pyodide_lockfile(context: BrowserContext, site: str) -> None:
+    """The site loads its packages from a Pyodide lockfile. Tests must run the same versions.
+
+    The pins in `pyproject.toml` and the installed packages must equal the lockfile that the
+    exported site requests. A new marimo release can move the lockfile. Then this test fails.
+    """
+    page = context.new_page()
+    lock_urls: list[str] = []
+    page.on(
+        "request",
+        lambda request: (
+            lock_urls.append(request.url) if "pyodide-lock.json" in request.url else None
+        ),
+    )
+    page.goto(site)
+    page.get_by_role("status").filter(has_text="Forschungsbände").wait_for(timeout=LOAD_TIMEOUT)
+    assert lock_urls, "The site did not request a Pyodide lockfile."
+    response = page.request.get(lock_urls[0])
+    assert response.ok, response.status
+    lockfile = response.json()
+    page.close()
+    lock = {
+        name.lower().replace("_", "-"): item["version"]
+        for name, item in lockfile["packages"].items()
+    }
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    pins = [*project["project"]["dependencies"], *project["tool"]["uv"]["constraint-dependencies"]]
+    mismatches: list[str] = []
+    checked: set[str] = set()
+    for pin in pins:
+        name, _, version = pin.partition("==")
+        if name == "bm25s":  # A PyPI package. The PEP 723 header of app.py pins it.
+            continue
+        checked.add(name)
+        installed = importlib.metadata.version(name)
+        if not (lock.get(name) == version == installed):
+            mismatches.append(
+                f"{name}: lockfile {lock.get(name)}, pin {version}, installed {installed}"
+            )
+    assert not mismatches, mismatches
+    assert {"marimo", "numpy", "pydantic", "pydantic-core"} <= checked
+    assert (
+        lockfile["info"]["python"].rsplit(".", 1)[0]
+        == f"{sys.version_info[0]}.{sys.version_info[1]}"
+    )

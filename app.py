@@ -1,5 +1,5 @@
 # /// script
-# requires-python = ">=3.12"
+# requires-python = "==3.14.*"
 # dependencies = [
 #     "bm25s==0.3.16",
 # ]
@@ -203,7 +203,7 @@ class SearchIndex(BaseModel):
     chunks: list[Chunk]
 
     @model_validator(mode="after")
-    def _check_chunks(self) -> "SearchIndex":
+    def _check_chunks(self) -> SearchIndex:
         seen: set[str] = set()
         for chunk in self.chunks:
             if chunk.id in seen:

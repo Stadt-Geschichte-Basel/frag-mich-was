@@ -71,10 +71,29 @@ The first visit needs a network connection.
 The application does not promise complete offline operation.
 
 The browser installs `bm25s` from PyPI. The export reads the pin `bm25s==0.3.16` from the PEP 723 header of `app.py`. Keep it equal to the pin in `pyproject.toml`. A test checks this.
-Pyodide supplies `marimo`, `pydantic`, and `numpy` at the versions of its own lockfile. A header pin does not change them.
-On 2026-11-16, the exported site ran `pydantic` 2.12.5 and `pydantic_core` 2.41.5, while `pyproject.toml` pins `pydantic` 2.14.3.
 Runtime and model downloads use `cdn.jsdelivr.net`, `files.pythonhosted.org`, `pypi.org`, `wasm.marimo.app`, and Hugging Face file hosts.
 Branding assets load from this site's `public/sgb/` directory.
+
+## Browser and local parity
+
+The browser runs on Pyodide 314.0.0 with Python 3.14. Pyodide supplies `marimo`, `pydantic`, `pydantic_core`, `numpy`, and the other packages from its own lockfile. A pin in the PEP 723 header does not change them.
+The local environment must run the same versions. Then the tests and the browser run the same code.
+
+- `.python-version` and `requires-python` select Python 3.14.
+- `pyproject.toml` pins `pydantic`, `marimo`, and `bm25s` directly.
+- `constraint-dependencies` in `pyproject.toml` pins every other package that the browser and the local environment share. Each pin equals the Pyodide version.
+- `bm25s` is the only runtime package from PyPI. Its pin in the header of `app.py` equals its pin in `pyproject.toml`.
+
+`msgspec` differs on purpose. Marimo 0.25.2 needs `msgspec` 0.22 or later in the local environment. The marimo runtime in the browser uses 0.20.0. The app does not use it.
+
+The browser test `test_local_versions_match_the_pyodide_lockfile` compares the pins and the installed packages with the lockfile that the exported site requests. It also compares the Python minor version.
+CI does not run it. After a marimo upgrade, update the pins:
+
+1. Run `uv run python -m scripts.export_site`.
+2. Run `uv run pytest -m browser --no-cov -k lockfile`. Read the mismatches.
+3. Set each pin in `pyproject.toml` to the lockfile version.
+4. Run `uv lock`. If a package conflicts with marimo, leave it out of the pins and name it here.
+5. Run `uv sync --locked` and the gate.
 
 ## Models
 
@@ -96,7 +115,7 @@ The plan allows three seconds to build the index and 200 milliseconds for one qu
 
 | Environment | Import | Tokenize and index | One query |
 | --- | --- | --- | --- |
-| Native Python 3.13 | 0.56 s | 0.23 s | 0.15 ms |
+| Native Python 3.14 | 0.08 s | 0.22 s | 0.01 ms |
 | Chromium, Pyodide | 0.16 s | 0.37 s | 0.6 ms |
 | Firefox, Pyodide | 0.18 s | 0.44 s | 1.0 ms |
 
