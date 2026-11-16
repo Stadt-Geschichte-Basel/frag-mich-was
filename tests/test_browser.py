@@ -7,9 +7,13 @@ These tests need the export in ``dist/``, the Playwright browsers, and network a
     uv run pytest -m browser --no-cov
 """
 
+import importlib.metadata
 import json
 import math
+import sys
 import threading
+import time
+import tomllib
 from collections.abc import Iterator
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -17,7 +21,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
-from playwright.sync_api import BrowserContext, Page, Route, sync_playwright
+from playwright.sync_api import BrowserContext, Page, Route, expect, sync_playwright
 
 from app import EMBEDDER_JS, QUERY_DTYPE, TRANSFORMERS_JS_URL, load_index
 
@@ -80,6 +84,31 @@ def search(page: Page, query: str) -> None:
     button.press("Enter")
 
 
+def choose_mode(page: Page, label: str) -> None:
+    """Select a search mode and wait until the control shows it."""
+    mode = page.get_by_role("combobox", name="Suchmodus")
+    mode.select_option(label=label)
+    expect(mode).to_have_value(label)
+
+
+def is_model_request(url: str) -> bool:
+    """A request for the model runtime or the model files."""
+    host = urlsplit(url).hostname or ""
+    return host.endswith(ALLOWED_HOST_SUFFIXES) or "@huggingface/transformers" in url
+
+
+def result_links(page: Page) -> list[str]:
+    return page.locator("ol.sgb-results a").evaluate_all("links => links.map(link => link.href)")
+
+
+def wait_for_links(page: Page, expected: list[str], timeout: float = 15.0) -> None:
+    """Wait until the results show the expected links. Marimo replaces the output a little later."""
+    deadline = time.monotonic() + timeout
+    while (links := result_links(page)) != expected:
+        assert time.monotonic() < deadline, f"{links} is not {expected}"
+        page.wait_for_timeout(200)
+
+
 def is_allowed(host: str) -> bool:
     local = host in {"", "localhost", "127.0.0.1"}
     return local or host in ALLOWED_HOSTS or host.endswith(ALLOWED_HOST_SUFFIXES)
@@ -103,7 +132,7 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
     assert page.locator('meta[name="theme-color"]').count() == 1
     assert page.title() == "Frag mich was – Semantische Suche | Stadt.Geschichte.Basel"
     assert page.locator('meta[name="description"]').count() == 1
-    assert "Semantische Suchmaschine" in (
+    assert "Lexikalische und semantische Suche" in (
         page.locator('meta[name="description"]').get_attribute("content") or ""
     )
     assert page.locator('meta[property="og:title"]').get_attribute("content") == page.title()
@@ -116,7 +145,13 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
         )
         == "Rhein und Handel in Basel"
     )
-    assert page.get_by_text("Semantische Suchmaschine für Basels Geschichte.").is_visible()
+    assert page.get_by_text(
+        "Lexikalische und semantische Suche für Basels Geschichte."
+    ).is_visible()
+    mode = page.get_by_role("combobox", name="Suchmodus")
+    assert mode.is_visible()
+    assert mode.locator("option").all_inner_texts() == ["Kombiniert", "Lexikalisch", "Semantisch"]
+    expect(mode).to_have_value("Semantisch")
     assert page.locator('link[rel="canonical"]').count() == 1
     assert page.locator('meta[property^="og:"]').count() == 7
     assert page.locator('meta[name="theme-color"]').get_attribute("content") == "#3a1e3e"
@@ -138,6 +173,10 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
     assert (
         page.locator(".sgb-brand").evaluate("element => getComputedStyle(element).backgroundColor")
         == "rgb(58, 30, 62)"
+    )
+    # No white stripe above the purple header.
+    assert (
+        page.locator(".sgb-brand").evaluate("element => element.getBoundingClientRect().top") == 0
     )
     viewport_width = page.evaluate("window.innerWidth")
     for band in (".sgb-brand", ".sgb-footer"):
@@ -254,15 +293,46 @@ def test_layout_reflows_at_320px_with_large_text(context: BrowserContext, site: 
         "*{line-height:1.5!important;letter-spacing:.12em!important;word-spacing:.16em!important}"
         "p{margin-bottom:2em!important}"
     )
+    page.locator("details").wait_for(timeout=LOAD_TIMEOUT)
     page.evaluate("document.querySelector('details').open = true")
-    clipped = page.evaluate(
-        """() => [...document.querySelectorAll('body *')]
+    clipped_script = """() => [...document.querySelectorAll('body *')]
         .filter(e => getComputedStyle(e).position !== 'fixed'
             && e.getBoundingClientRect().width > 0
             && e.getBoundingClientRect().right > innerWidth + 1)
         .map(e => e.tagName + ' ' + (e.textContent || '').slice(0, 30))"""
-    )
-    assert clipped == []
+    assert page.get_by_role("combobox", name="Suchmodus").is_visible()
+    assert page.evaluate(clipped_script) == []
+    # The lexical mode needs no model, so the results show at once.
+    choose_mode(page, "Lexikalisch")
+    search(page, "Merian")
+    page.locator("ol.sgb-results li").first.wait_for(timeout=LOAD_TIMEOUT)
+    assert page.evaluate(clipped_script) == []
+    page.close()
+
+
+def test_mode_control_works_with_the_keyboard(context: BrowserContext, site: str) -> None:
+    """Tab reaches the mode list. A key selects the mode. The lexical search needs no model."""
+    errors: list[str] = []
+    page = open_page(context, set(), errors)
+    page.goto(site)
+    page.get_by_role("status").filter(has_text="Forschungsbände").wait_for(timeout=LOAD_TIMEOUT)
+    mode = page.get_by_role("combobox", name="Suchmodus")
+    box = mode.bounding_box()
+    assert box is not None and round(box["height"], 3) >= 44
+    page.get_by_role("button", name="Suchen").focus()
+    page.keyboard.press("Tab")
+    assert mode.evaluate("element => element.getRootNode().activeElement === element")
+    assert mode.evaluate("element => getComputedStyle(element).outlineWidth") == "3px"
+    page.keyboard.press("L")  # The list selects the option that starts with the typed letter.
+    expect(mode).to_have_value("Lexikalisch")
+    search(page, "1501")
+    page.locator("ol.sgb-results li").first.wait_for(timeout=LOAD_TIMEOUT)
+    texts = [" ".join(text.split()) for text in page.locator("ol.sgb-results li").all_inner_texts()]
+    assert 1 <= len(texts) <= 5
+    assert all("1501" in text for text in texts)
+    assert len(set(result_links(page))) == len(texts)
+    assert not errors
+    page.close()
 
 
 @pytest.mark.parametrize(
@@ -276,6 +346,7 @@ def test_footer_ends_the_page(
     page.set_viewport_size({"width": width, "height": height})
     page.goto(site)
     page.get_by_role("status").filter(has_text="Forschungsbände").wait_for(timeout=LOAD_TIMEOUT)
+    page.locator(".sgb-footer").wait_for(timeout=LOAD_TIMEOUT)
     if large_text:
         page.add_style_tag(
             content="html{font-size:200%!important}"
@@ -370,8 +441,11 @@ def test_model_failure_shows_retry(context: BrowserContext, site: str) -> None:
     page.get_by_text(
         f"{len({chunk.source[4:6] for chunk in INDEX.chunks if chunk.content_type == 'chapter'})} Forschungsbände"
     ).wait_for(timeout=LOAD_TIMEOUT)
+    # The default mode is Semantisch. A failed model download is an error there.
+    expect(page.get_by_role("combobox", name="Suchmodus")).to_have_value("Semantisch")
     search(page, FIXTURE["reference"]["query"])
     page.get_by_text("Die Suche ist fehlgeschlagen.").wait_for(timeout=MODEL_TIMEOUT)
+    assert page.get_by_text("Die lexikalische Suche braucht das Sprachmodell nicht.").is_visible()
     assert page.locator("ol li").count() == 0
 
     page.unroute("https://huggingface.co/**", block)
@@ -406,4 +480,228 @@ def test_story_search_end_to_end(context: BrowserContext, site: str, tmp_path: P
         page.set_viewport_size({"width": width, "height": 844})
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         result.screenshot(path=str(tmp_path / f"story-result-{width}.png"))
+    page.close()
+
+
+def test_modes_keep_the_query_and_work_without_the_model(
+    context: BrowserContext, site: str
+) -> None:
+    """The lexical mode needs no model. The combined mode falls back. A retry recovers."""
+    assert context.browser is not None
+    fresh = context.browser.new_context()  # An empty cache, so that the model must download.
+    errors: list[str] = []
+    page = open_page(fresh, set(), errors)
+    model_requests: list[str] = []
+    page.on("request", lambda request: model_requests.append(request.url))
+
+    def block(route: Route) -> None:
+        route.abort()
+
+    page.route("https://huggingface.co/**", block)
+    page.goto(site)
+    page.get_by_role("status").filter(has_text="Forschungsbände").wait_for(timeout=LOAD_TIMEOUT)
+    field = page.get_by_role("textbox", name="Wonach suchst du in Basels Geschichte?")
+    notice = page.get_by_text("Das Sprachmodell ist nicht verfügbar.")
+    failure = page.get_by_text("Die Suche ist fehlgeschlagen.")
+
+    # Lexical mode: results without any model request.
+    choose_mode(page, "Lexikalisch")
+    search(page, "Merian")
+    page.locator("ol.sgb-results li").first.wait_for(timeout=LOAD_TIMEOUT)
+    lexical_links = result_links(page)
+    assert 1 <= len(lexical_links) == len(set(lexical_links)) <= 5
+    assert not [url for url in model_requests if is_model_request(url)]
+    assert notice.count() == failure.count() == 0
+
+    # Combined mode with the model blocked: lexical results, a short notice, and a retry button.
+    choose_mode(page, "Kombiniert")
+    notice.wait_for(timeout=MODEL_TIMEOUT)
+    assert field.input_value() == "Merian"
+    assert result_links(page) == lexical_links
+    assert (
+        page.get_by_role("status").filter(has_text="Das Sprachmodell ist nicht verfügbar").count()
+    )
+    assert page.get_by_role("button", name="Erneut versuchen").is_visible()
+
+    # Semantic mode with the model blocked: the error, a hint about the lexical mode, and a retry.
+    choose_mode(page, "Semantisch")
+    failure.wait_for(timeout=MODEL_TIMEOUT)
+    assert notice.count() == 0
+    assert field.input_value() == "Merian"
+    assert page.get_by_text("Die lexikalische Suche braucht das Sprachmodell nicht.").is_visible()
+    assert page.locator("ol.sgb-results").count() == 0
+    assert page.get_by_role("alert").filter(has_text="Die Suche ist fehlgeschlagen.").count() == 1
+
+    # The retry button recovers once the model loads.
+    page.unroute("https://huggingface.co/**", block)
+    page.get_by_role("button", name="Erneut versuchen").press("Enter")
+    page.locator("ol.sgb-results li").first.wait_for(timeout=MODEL_TIMEOUT)
+    assert failure.count() == 0
+    assert field.input_value() == "Merian"
+    assert any(is_model_request(url) for url in model_requests)
+
+    # Back in combined mode: no notice, and results for the same query.
+    choose_mode(page, "Kombiniert")
+    notice.wait_for(state="detached", timeout=MODEL_TIMEOUT)
+    page.locator("ol.sgb-results li").first.wait_for(timeout=MODEL_TIMEOUT)
+    assert field.input_value() == "Merian"
+    assert 1 <= len(result_links(page)) <= 5
+
+    # Lexical mode again: the same results as the first time.
+    choose_mode(page, "Lexikalisch")
+    wait_for_links(page, lexical_links)
+    assert field.input_value() == "Merian"
+    assert not errors
+    fresh.close()
+
+
+def test_local_versions_match_the_pyodide_lockfile(context: BrowserContext, site: str) -> None:
+    """The site loads its packages from a Pyodide lockfile. Tests must run the same versions.
+
+    The pins in `pyproject.toml` and the installed packages must equal the lockfile that the
+    exported site requests. A new marimo release can move the lockfile. Then this test fails.
+    """
+    page = context.new_page()
+    lock_urls: list[str] = []
+    page.on(
+        "request",
+        lambda request: (
+            lock_urls.append(request.url) if "pyodide-lock.json" in request.url else None
+        ),
+    )
+    page.goto(site)
+    page.get_by_role("status").filter(has_text="Forschungsbände").wait_for(timeout=LOAD_TIMEOUT)
+    assert lock_urls, "The site did not request a Pyodide lockfile."
+    response = page.request.get(lock_urls[0])
+    assert response.ok, response.status
+    lockfile = response.json()
+    page.close()
+    lock = {
+        name.lower().replace("_", "-"): item["version"]
+        for name, item in lockfile["packages"].items()
+    }
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    pins = [*project["project"]["dependencies"], *project["tool"]["uv"]["constraint-dependencies"]]
+    mismatches: list[str] = []
+    checked: set[str] = set()
+    for pin in pins:
+        name, _, version = pin.partition("==")
+        if name == "bm25s":  # A PyPI package. The PEP 723 header of app.py pins it.
+            continue
+        checked.add(name)
+        installed = importlib.metadata.version(name)
+        if not (lock.get(name) == version == installed):
+            mismatches.append(
+                f"{name}: lockfile {lock.get(name)}, pin {version}, installed {installed}"
+            )
+    assert not mismatches, mismatches
+    assert {"marimo", "numpy", "pydantic", "pydantic-core"} <= checked
+    assert (
+        lockfile["info"]["python"].rsplit(".", 1)[0]
+        == f"{sys.version_info[0]}.{sys.version_info[1]}"
+    )
+
+
+def test_comparison_saved_queries_navigation_and_filters(
+    context: BrowserContext, site: str
+) -> None:
+    """The public comparison uses saved data and links back to the search."""
+    page = context.new_page()
+    requests: list[str] = []
+    errors: list[str] = []
+    page.on("request", lambda request: requests.append(request.url))
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.goto(site + "vergleich.html")
+    expect(page.get_by_role("heading", name="Suchmodi vergleichen", exact=True)).to_be_visible(
+        timeout=LOAD_TIMEOUT
+    )
+    expect(page.get_by_role("combobox", name="Beispielfrage", exact=True)).to_be_visible(
+        timeout=LOAD_TIMEOUT
+    )
+    assert page.locator("html").get_attribute("lang") == "de-CH"
+    assert page.title() == "Suchmodi vergleichen | Frag mich was – Stadt.Geschichte.Basel"
+    assert (
+        page.locator(".sgb-brand").evaluate("el => getComputedStyle(el).backgroundColor")
+        == "rgb(58, 30, 62)"
+    )
+    assert page.locator(".sgb-brand").evaluate("el => el.getBoundingClientRect().top") == 0
+    assert "Euclid Circular B" in page.locator("body").evaluate(
+        "el => getComputedStyle(el).fontFamily"
+    )
+    assert page.get_by_role("textbox").count() == 0
+    expect(page.get_by_role("heading", name="Was der Vergleich zeigt", exact=True)).to_be_visible()
+    expect(page.locator(".sgb-insights")).to_contain_text("Schweizerhalle")
+
+    page.get_by_role("combobox", name="Fragetyp", exact=True).select_option(label="Mehrere Quellen")
+    expect(page.get_by_text("4 Fragen passen zum Filter.", exact=False)).to_be_visible()
+    reference = FIXTURE["comparison_references"][-1]
+    page.get_by_role("combobox", name="Beispielfrage", exact=True).select_option(
+        label=reference["query"]
+    )
+    expected = page.locator(".sgb-expected a")
+    expect(expected).to_have_count(2)
+    expect(expected.first).to_have_attribute("href", reference["expected_urls"][0])
+    assert (
+        expected.evaluate_all("links => links.map(link => link.href)") == reference["expected_urls"]
+    )
+    expect(page.locator(".sgb-comparison-results section")).to_have_count(3)
+    assert not any(
+        "embeddings.json" in url
+        or "huggingface" in url
+        or ".onnx" in url
+        or "transformers" in url
+        or "/public/wheels/" in url
+        for url in requests
+    )
+    assert any("/frag-mich-was/public/comparison.json" in url for url in requests)
+    assert errors == []
+
+    page.get_by_role("combobox", name="Fragetyp", exact=True).select_option(label="Alle")
+    expect(page.get_by_text("44 Fragen passen zum Filter.", exact=False)).to_be_visible()
+    assert page.get_by_role("combobox", name="Thema", exact=True).count() == 0
+    assert page.get_by_role("checkbox").count() == 0
+
+    page.set_viewport_size({"width": 390, "height": 844})
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    columns = page.locator(".sgb-comparison-results").evaluate(
+        "el => getComputedStyle(el).gridTemplateColumns"
+    )
+    assert len(columns.split()) == 1
+    back = page.locator(".sgb-brand").get_by_role("link", name="Zur Suche", exact=True)
+    page.locator(".sgb-brand a").first.focus()
+    page.keyboard.press("Tab")
+    assert back.evaluate("el => el.getRootNode().activeElement === el")
+    assert back.evaluate("el => getComputedStyle(el).outlineStyle") != "none"
+    back.press("Enter")
+    expect(page.get_by_role("heading", name="Frag mich was", exact=True)).to_be_visible(
+        timeout=LOAD_TIMEOUT
+    )
+    page.get_by_text("Über die Suche", exact=True).click()
+    comparison_link = page.locator(".sgb-about").get_by_role(
+        "link", name="Suchmodi vergleichen", exact=True
+    )
+    expect(comparison_link).to_have_attribute("href", "vergleich.html")
+    comparison_link.click()
+    expect(page.get_by_role("heading", name="Suchmodi vergleichen", exact=True)).to_be_visible(
+        timeout=LOAD_TIMEOUT
+    )
+    page.close()
+
+
+def test_comparison_report_failure_is_explained_in_german(
+    context: BrowserContext, site: str
+) -> None:
+    page = context.new_page()
+    page.route(
+        "**/public/comparison.json",
+        lambda route: route.fulfill(status=200, body='{"schema_version":99}'),
+    )
+    page.goto(site + "vergleich.html")
+    expect(page.get_by_role("alert")).to_contain_text(
+        "Der Vergleich ist nicht verfügbar.", timeout=LOAD_TIMEOUT
+    )
+    expect(
+        page.locator(".sgb-brand").get_by_role("link", name="Zur Suche", exact=True)
+    ).to_be_visible()
+    assert page.get_by_role("combobox", name="Beispielfrage", exact=True).count() == 0
     page.close()

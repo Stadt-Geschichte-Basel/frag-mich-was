@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from scripts.comparison_report import build_report
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -39,29 +41,41 @@ def prepare_html(raw: str) -> str:
 
 
 def main() -> None:
-    """Export the notebook, then prepare the HTML before returning.
+    """Export both notebooks and their validated comparison report.
 
     >>> callable(main)
     True
     """
-    subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "marimo",
-            "export",
-            "html-wasm",
-            "app.py",
-            "-o",
-            "dist",
-            "--mode",
-            "run",
-        ],
-        cwd=ROOT,
-        check=True,
-    )
-    path = ROOT / "dist" / "index.html"
-    path.write_text(prepare_html(path.read_text(encoding="utf-8")), encoding="utf-8")
+    for notebook, output, filename in (
+        ("app.py", "dist", "index.html"),
+        ("compare.py", "dist/vergleich.html", "vergleich.html"),
+    ):
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "marimo",
+                "export",
+                "html-wasm",
+                notebook,
+                "-o",
+                output,
+                "--mode",
+                "run",
+            ],
+            cwd=ROOT,
+            check=True,
+        )
+        path = ROOT / "dist" / filename
+        path.write_text(prepare_html(path.read_text(encoding="utf-8")), encoding="utf-8")
+    if any((ROOT / "dist" / "public" / "wheels").glob("*.whl")):
+        raise ValueError("Local Python wheels must not enter the site export.")
+    report = build_report()
+    report_path = ROOT / "dist" / "public" / "comparison.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(report.model_dump_json() + "\n", encoding="utf-8")
+    # Re-read the deployed artifact through the same validation boundary as the browser.
+    type(report).model_validate_json(report_path.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

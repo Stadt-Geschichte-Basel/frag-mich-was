@@ -1,3 +1,10 @@
+# /// script
+# requires-python = "==3.14.*"
+# dependencies = [
+#     "bm25s==0.3.16",
+# ]
+# ///
+
 import marimo
 
 __generated_with = "0.25.2"
@@ -12,11 +19,13 @@ with app.setup:
     import html
     import math
     import sys
-    from collections.abc import Sequence
+    from collections.abc import Awaitable, Callable, Iterable, Sequence
+    from dataclasses import dataclass
     from pathlib import Path
-    from typing import Any, Literal
+    from typing import Any, Literal, cast
     from urllib.parse import urlsplit
 
+    import bm25s
     import marimo as mo
     from pydantic import (
         BaseModel,
@@ -34,6 +43,17 @@ with app.setup:
 
     INDEX_PATH = ("public", "embeddings.json")
     TOP_K = 5
+    # Reciprocal Rank Fusion: a publication scores the sum of 1 / (RRF_K + rank), with ranks from 1.
+    RRF_K = 60
+    Mode = Literal["combined", "lexical", "semantic"]
+    # The labels that the mode control shows, with the mode that each selects.
+    MODES: dict[str, Mode] = {
+        "Kombiniert": "combined",
+        "Lexikalisch": "lexical",
+        "Semantisch": "semantic",
+    }
+    # The mode that a new visit shows. It is a key of MODES.
+    DEFAULT_MODE_LABEL = "Semantisch"
     NORM_TOLERANCE = 0.01
     APPROVED_URL_HOSTS = frozenset({"doi.org"})
     IS_WASM = sys.platform == "emscripten"
@@ -183,7 +203,7 @@ class SearchIndex(BaseModel):
     chunks: list[Chunk]
 
     @model_validator(mode="after")
-    def _check_chunks(self) -> "SearchIndex":
+    def _check_chunks(self) -> SearchIndex:
         seen: set[str] = set()
         for chunk in self.chunks:
             if chunk.id in seen:
@@ -215,8 +235,31 @@ def load_index(raw: str) -> SearchIndex:
 
 
 @app.function
+def best_per_publication(
+    scored: Iterable[tuple[Chunk, float]], top_k: int | None = TOP_K
+) -> list[tuple[Chunk, float]]:
+    """Return each publication’s best passage, best first. Break a score tie by chunk ID.
+
+    A publication is ``chunk.url or chunk.id``. Pass ``top_k=None`` to keep every publication.
+
+    >>> a = Chunk(id="a", title="A", text="x", source="a.md", url="u", embedding=[1.0])
+    >>> b = Chunk(id="b", title="A", text="y", source="a.md", url="u", embedding=[1.0])
+    >>> c = Chunk(id="c", title="C", text="z", source="c.md", embedding=[1.0])
+    >>> [(chunk.id, score) for chunk, score in best_per_publication([(b, 1.0), (a, 1.0), (c, 2.0)])]
+    [('c', 2.0), ('a', 1.0)]
+    >>> len(best_per_publication([(a, 1.0), (c, 2.0)], top_k=1))
+    1
+    """
+    ordered = sorted(scored, key=lambda pair: (-pair[1], pair[0].id))
+    distinct: dict[str, tuple[Chunk, float]] = {}
+    for chunk, score in ordered:
+        distinct.setdefault(chunk.url or chunk.id, (chunk, score))
+    return list(distinct.values())[:top_k]
+
+
+@app.function
 def rank(
-    query: Sequence[float], chunks: Sequence[Chunk], top_k: int = TOP_K
+    query: Sequence[float], chunks: Sequence[Chunk], top_k: int | None = TOP_K
 ) -> list[tuple[Chunk, float]]:
     """Return each publication’s best passage by dot product. Break a tie by chunk ID.
 
@@ -227,12 +270,243 @@ def rank(
     >>> [(chunk.id, value) for chunk, value in rank([0.0, 1.0], [a, b])]
     [('b', 1.0), ('a', 0.0)]
     """
-    scored = [(chunk, math.sumprod(query, chunk.embedding)) for chunk in chunks]
-    scored.sort(key=lambda pair: (-pair[1], pair[0].id))
-    distinct: dict[str, tuple[Chunk, float]] = {}
-    for chunk, score in scored:
-        distinct.setdefault(chunk.url or chunk.id, (chunk, score))
-    return list(distinct.values())[:top_k]
+    return best_per_publication(
+        ((chunk, math.sumprod(query, chunk.embedding)) for chunk in chunks), top_k
+    )
+
+
+@app.function
+def lexical_tokens(texts: Sequence[str]) -> list[list[str]]:
+    """Split each text into lowercase words. Drop German stopwords. Do not stem.
+
+    The index and each query use this function, so that both sides split words alike.
+
+    >>> lexical_tokens(["Der Rhein und 1501 in Basel.", "und der"])
+    [['rhein', '1501', 'basel'], []]
+    """
+    # With return_ids=False, bm25s returns one list of words for each text.
+    return cast(
+        list[list[str]],
+        bm25s.tokenize(
+            list(texts), stopwords="de", lower=True, return_ids=False, show_progress=False
+        ),
+    )
+
+
+@app.class_definition
+@dataclass(frozen=True)
+class LexicalIndex:
+    """A BM25 index with the passages in the order of its documents.
+
+    >>> a = Chunk(id="a", title="Basel", text="Der Rhein.", source="a.md", embedding=[1.0])
+    >>> LexicalIndex(bm25s.BM25(), (a,)).chunks == (a,)
+    True
+    """
+
+    retriever: bm25s.BM25
+    chunks: tuple[Chunk, ...]
+
+
+@app.function
+def build_lexical_index(chunks: Sequence[Chunk]) -> LexicalIndex:
+    """Index the title and the text of each passage.
+
+    >>> a = Chunk(id="a", title="Basel", text="Der Rhein.", source="a.md", embedding=[1.0])
+    >>> build_lexical_index([a]).chunks == (a,)
+    True
+    """
+    retriever = bm25s.BM25()
+    retriever.index(
+        lexical_tokens([f"{chunk.title}\n{chunk.text}" for chunk in chunks]), show_progress=False
+    )
+    return LexicalIndex(retriever, tuple(chunks))
+
+
+@app.function
+def lexical_rank(
+    lexical: LexicalIndex, query: str, top_k: int | None = TOP_K
+) -> list[tuple[Chunk, float]]:
+    """Return each publication’s best passage by BM25 score. Skip passages with no match.
+
+    An empty, stopword-only, or unknown query matches nothing.
+
+    >>> a = Chunk(id="a", title="Basel", text="Der Rhein.", source="a.md", embedding=[1.0])
+    >>> b = Chunk(id="b", title="Bern", text="Die Aare.", source="b.md", embedding=[1.0])
+    >>> index = build_lexical_index([a, b])
+    >>> [chunk.id for chunk, _ in lexical_rank(index, "Rhein")]
+    ['a']
+    >>> lexical_rank(index, "der die das")
+    []
+    """
+    tokens = lexical_tokens([query])[0]
+    if not tokens:
+        return []
+    scores = lexical.retriever.get_scores(tokens)
+    matches = (
+        (chunk, float(score))
+        for chunk, score in zip(lexical.chunks, scores, strict=True)
+        if score > 0
+    )
+    return best_per_publication(matches, top_k)
+
+
+@app.function
+def fuse(
+    semantic: Sequence[tuple[Chunk, float]],
+    lexical: Sequence[tuple[Chunk, float]],
+    top_k: int | None = TOP_K,
+) -> list[tuple[Chunk, float]]:
+    """Combine two complete publication rankings with Reciprocal Rank Fusion.
+
+    Each ranking lists a publication once, best first. A publication scores the sum of
+    ``1 / (60 + rank)`` over the rankings that contain it. Ranks start at 1.
+    The passage comes from the ranking with the better rank. The semantic passage wins a tie.
+    A score tie breaks by the ID of the chosen passage. The result is cut to ``top_k``.
+
+    >>> a = Chunk(id="a", title="A", text="x", source="a.md", embedding=[1.0])
+    >>> b = Chunk(id="b", title="B", text="y", source="b.md", embedding=[1.0])
+    >>> [(chunk.id, round(score, 4)) for chunk, score in fuse([(a, 0.9), (b, 0.5)], [(b, 3.0)])]
+    [('b', 0.0325), ('a', 0.0164)]
+    """
+    scores: dict[str, float] = {}
+    # The better rank wins. At equal rank, the earlier ranking (semantic) wins.
+    passages: dict[str, tuple[int, Chunk]] = {}
+    for ranking in (semantic, lexical):
+        for position, (chunk, _score) in enumerate(ranking, start=1):
+            key = chunk.url or chunk.id
+            scores[key] = scores.get(key, 0.0) + 1 / (RRF_K + position)
+            if key not in passages or position < passages[key][0]:
+                passages[key] = (position, chunk)
+    fused = [(passages[key][1], score) for key, score in scores.items()]
+    fused.sort(key=lambda pair: (-pair[1], pair[0].id))
+    return fused[:top_k]
+
+
+@app.function
+def search(
+    mode: Mode, query: str, vector: Sequence[float] | None, lexical: LexicalIndex
+) -> list[tuple[Chunk, float]]:
+    """Return up to five distinct publications for the query in the chosen mode.
+
+    The semantic mode needs the query vector. The lexical mode does not.
+    Without the vector, the combined mode falls back to the lexical ranking.
+
+    >>> a = Chunk(id="a", title="Basel", text="Der Rhein.", source="a.md", embedding=[1.0])
+    >>> index = build_lexical_index([a])
+    >>> [chunk.id for chunk, _ in search("lexical", "Rhein", None, index)]
+    ['a']
+    >>> [chunk.id for chunk, _ in search("semantic", "Rhein", [1.0], index)]
+    ['a']
+    >>> [chunk.id for chunk, _ in search("combined", "Rhein", [1.0], index)]
+    ['a']
+    >>> [chunk.id for chunk, _ in search("combined", "Rhein", None, index)]
+    ['a']
+    >>> search("semantic", "Rhein", None, index)
+    Traceback (most recent call last):
+    ValueError: The semantic mode needs a query vector.
+    """
+    if mode == "lexical" or (mode == "combined" and vector is None):
+        return lexical_rank(lexical, query)
+    if vector is None:
+        raise ValueError("The semantic mode needs a query vector.")
+    semantic = rank(vector, lexical.chunks, None)
+    if mode == "semantic":
+        return semantic[:TOP_K]
+    return fuse(semantic, lexical_rank(lexical, query, None))
+
+
+@app.function
+async def load_embedder(model: ModelInfo) -> Any:
+    """Load the embedding function of the query model into the browser.
+
+    Only the browser has Pyodide and the JavaScript runtime. Elsewhere, this raises.
+
+    >>> import asyncio
+    >>> info = ModelInfo(
+    ...     document_model="a", document_revision="1", query_model="b", query_revision="2", dimensions=2
+    ... )
+    >>> asyncio.run(load_embedder(info))
+    Traceback (most recent call last):
+    RuntimeError: The model needs the WebAssembly version.
+    """
+    if not IS_WASM:
+        raise RuntimeError("The model needs the WebAssembly version.")
+    # The browser tests cover the next two statements.
+    from pyodide.code import run_js  # ty: ignore[import-not-found]  # pragma: no cover
+
+    return await run_js(EMBEDDER_JS)(  # pragma: no cover
+        TRANSFORMERS_JS_URL, model.query_model, model.query_revision, QUERY_DTYPE
+    )
+
+
+@app.function
+async def query_vector(
+    session: dict[str, Any],
+    model: ModelInfo,
+    query: str,
+    load: Callable[[ModelInfo], Awaitable[Any]],
+) -> list[float]:
+    """Return the vector of a query. Reuse the vector of the last successful query.
+
+    ``session`` keeps the embedding function (``embed``), the last successful query (``query``),
+    and its vector (``vector``). The first call loads the embedding function with ``load``.
+    A failure leaves the last successful query and its vector as they were.
+
+    >>> import asyncio
+    >>> class Vector:
+    ...     def to_py(self):
+    ...         return [1.0, 0.0]
+    >>> async def embed(text):
+    ...     return Vector()
+    >>> async def load(model):
+    ...     return embed
+    >>> info = ModelInfo(
+    ...     document_model="a", document_revision="1", query_model="b", query_revision="2", dimensions=2
+    ... )
+    >>> session = {}
+    >>> asyncio.run(query_vector(session, info, "Rhein", load))
+    [1.0, 0.0]
+    >>> session["query"]
+    'Rhein'
+    """
+    if session.get("query") == query:
+        return session["vector"]
+    if "embed" not in session:
+        session["embed"] = await load(model)
+    vector = (await session["embed"](model.query_prefix + query)).to_py()
+    check_vector(vector, model.dimensions)
+    session["query"] = query
+    session["vector"] = vector
+    return vector
+
+
+@app.function
+async def vector_for(
+    mode: Mode,
+    query: str,
+    session: dict[str, Any],
+    model: ModelInfo,
+    load: Callable[[ModelInfo], Awaitable[Any]],
+) -> list[float] | None:
+    """Return the query vector that the mode needs. Return ``None`` if the model fails.
+
+    The lexical mode needs no vector, so it never loads the model.
+
+    >>> import asyncio
+    >>> async def load(model):
+    ...     raise RuntimeError("offline")
+    >>> info = ModelInfo(
+    ...     document_model="a", document_revision="1", query_model="b", query_revision="2", dimensions=2
+    ... )
+    >>> asyncio.run(vector_for("lexical", "Rhein", {}, info, load))
+    >>> asyncio.run(vector_for("semantic", "Rhein", {}, info, load))
+    """
+    if mode == "lexical":
+        return None
+    try:
+        return await query_vector(session, model, query, load)
+    except Exception:
+        return None
 
 
 @app.function
@@ -298,7 +572,7 @@ def _():
 
     # Frag mich was
 
-    **Semantische Suchmaschine für Basels Geschichte.**
+    **Lexikalische und semantische Suche für Basels Geschichte.**
 
     Finde passende Textstellen und öffne die Originalpublikationen.
     """)
@@ -374,14 +648,34 @@ def _(index):
 
 
 @app.cell
+def _(index):
+    mo.stop(index is None or not index.chunks)
+    # The control sits outside the form. A change of mode runs the search again with the
+    # query that the form last submitted.
+    # A native select keeps its label, its focus, and its keyboard behaviour. The radio of marimo
+    # names its group "Radio Group" and does not keep the focus on the checked option.
+    mode = mo.ui.dropdown(options=MODES, value=DEFAULT_MODE_LABEL, label="Suchmodus")
+    mode
+    return (mode,)
+
+
+@app.cell
+def _(index):
+    mo.stop(index is None or not index.chunks)
+    lexical = build_lexical_index(index.chunks)
+    return (lexical,)
+
+
+@app.cell
 def _():
     # Holds the JavaScript embedding function, so that each search uses the same model instance.
+    # It also holds the last successful query with its vector. A change of mode reuses them.
     session: dict[str, Any] = {}
     return (session,)
 
 
 @app.cell
-async def _(form, index, retry, session):
+async def _(form, index, lexical, mode, retry, session):
     retry.value  # A click on Retry runs this cell again.
     mo.stop(form.value is None)
     _query = (form.value or "").strip()
@@ -389,57 +683,64 @@ async def _(form, index, retry, session):
         not _query,
         mo.Html('<p role="status">Gib ein Thema oder eine Frage ein. Wähle dann «Suchen».</p>'),
     )
-    mo.stop(
-        not IS_WASM,
-        mo.callout(
-            mo.md(
-                "Die Suche benötigt die WebAssembly-Version. Öffne die veröffentlichte Webseite."
+    _mode: Mode = mode.value
+    if _mode != "lexical":
+        mo.stop(
+            _mode == "semantic" and not IS_WASM,
+            mo.callout(
+                mo.md(
+                    "Die semantische Suche benötigt die WebAssembly-Version. "
+                    "Öffne die veröffentlichte Webseite."
+                ),
+                kind="warn",
             ),
-            kind="warn",
-        ),
-    )
-    try:
-        if "embed" not in session:
+        )
+        if IS_WASM and session.get("query") != _query:
             mo.output.replace(
                 mo.Html(
                     '<p role="status">Die erste Suche wird vorbereitet. '
                     "Dafür laden wir etwa 120 MB herunter. Das kann einen Moment dauern.</p>"
+                    if "embed" not in session
+                    else '<p role="status">Suche läuft.</p>'
                 )
             )
-            from pyodide.code import run_js  # ty: ignore[import-not-found]
-
-            session["embed"] = await run_js(EMBEDDER_JS)(
-                TRANSFORMERS_JS_URL,
-                index.model.query_model,
-                index.model.query_revision,
-                QUERY_DTYPE,
-            )
-        mo.output.replace(mo.Html('<p role="status">Suche läuft.</p>'))
-        _vector = (await session["embed"](index.model.query_prefix + _query)).to_py()
-        check_vector(_vector, index.model.dimensions)
-        _output = mo.vstack(
-            [
-                mo.md(
-                    "Die Ergebnisse sind Textauszüge aus den Originalpublikationen, "
-                    "keine generierten Antworten."
+    _vector = await vector_for(_mode, _query, session, index.model, load_embedder)
+    # Without the vector, the combined mode shows lexical results. The semantic mode has none.
+    _model_failed = _vector is None and _mode != "lexical"
+    _parts: list[Any] = []
+    if _model_failed and _mode == "semantic":
+        _parts.append(
+            mo.callout(
+                mo.Html(
+                    '<div role="alert"><strong>Die Suche ist fehlgeschlagen.</strong> '
+                    "Prüfe deine Internetverbindung und wähle «Erneut versuchen». "
+                    "Die lexikalische Suche braucht das Sprachmodell nicht.</div>"
                 ),
-                mo.Html(render_results(rank(_vector, index.chunks))),
-            ]
+                kind="danger",
+            )
         )
-    except Exception as _exc:
-        _output = mo.vstack(
-            [
+        _parts.append(retry)
+    else:
+        if _model_failed:
+            _parts.append(
                 mo.callout(
                     mo.Html(
-                        '<div role="alert"><strong>Die Suche ist fehlgeschlagen.</strong> '
+                        '<div role="status"><strong>Das Sprachmodell ist nicht verfügbar.</strong> '
+                        "Die Ergebnisse stammen nur aus der lexikalischen Suche. "
                         "Prüfe deine Internetverbindung und wähle «Erneut versuchen».</div>"
                     ),
-                    kind="danger",
-                ),
-                retry,
-            ]
+                    kind="warn",
+                )
+            )
+            _parts.append(retry)
+        _parts.append(
+            mo.md(
+                "Die Ergebnisse sind Textauszüge aus den Originalpublikationen, "
+                "keine generierten Antworten."
+            )
         )
-    mo.output.replace(_output)
+        _parts.append(mo.Html(render_results(search(_mode, _query, _vector, lexical))))
+    mo.output.replace(mo.vstack(_parts))
     return
 
 
@@ -448,18 +749,28 @@ def _():
     mo.Html("""
     <details class="sgb-about">
     <summary>Über die Suche</summary>
-    <p>Frag mich was ist eine semantische Suchmaschine für die Forschungsbände
+    <p>Frag mich was ist eine Suchmaschine für die Forschungsbände
     von Stadt.Geschichte.Basel / Christoph Merian Verlag und sieben Data Stories.
     Sie durchsucht die Kapitel einschliesslich der Einleitungen sowie die Erzähltexte
     der Data Stories. Die Anhänge mit Verzeichnissen und «Das jüdische Basel» sind nicht enthalten.
     Alle Data Stories tragen den gemeinsamen Bandtitel «Data Stories».</p>
-    <p>Die Suche vergleicht die Bedeutung deiner Eingabe mit den Textstellen.
-    Die Reihenfolge beruht auf sprachlicher Ähnlichkeit. Die Suche kann wichtige Stellen übersehen
-    oder unpassende Stellen anzeigen. Die Textstellen sind keine geprüften Antworten auf deine Eingabe.
+    <p>Du kannst unter «Suchmodus» zwischen drei Modi wählen.
+    «Semantisch» ist voreingestellt. Dieser Modus vergleicht die Bedeutung deiner Eingabe mit den Textstellen.
+    Die Reihenfolge beruht dann auf sprachlicher Ähnlichkeit.
+    «Lexikalisch» findet Wörter, Namen und Jahreszahlen so, wie sie in den Texten stehen.
+    Er findet nur ganze Wörter in derselben Form und braucht kein Sprachmodell.
+    «Kombiniert» führt die semantische und die lexikalische Suche zusammen.
+    Wenn du den Modus wechselst, bleibt deine Eingabe erhalten.</p>
+    <p><a href="vergleich.html">Suchmodi vergleichen</a>:
+    Erkunde Beispielfragen, Quellen und die Ranglisten der drei Suchmodi.</p>
+    <p>Die Suche kann wichtige Stellen übersehen oder unpassende Stellen anzeigen.
+    Die Textstellen sind keine geprüften Antworten auf deine Eingabe.
     Prüfe die Aussage und ihren Zusammenhang in der Originalpublikation.</p>
     <p>Deine Eingabe wird lokal in deinem Browser verarbeitet und bleibt auf deinem Gerät.
     Beim ersten Besuch braucht die Seite eine Internetverbindung.
-    Die erste Suche lädt ein Sprachmodell von etwa 120 MB herunter.
+    Die erste Suche in den Modi «Kombiniert» und «Semantisch» lädt ein Sprachmodell von etwa 120 MB herunter.
+    Die lexikalische Suche braucht diesen Download nicht.
+    Wenn das Sprachmodell nicht lädt, zeigt «Kombiniert» nur lexikalische Ergebnisse.
     Die Links «Originalkapitel öffnen» führen über die DOI zur jeweiligen Publikation.
     «Originalstory öffnen» führt zur Data Story auf ArcGIS StoryMaps.
     «Nur Zusammenfassung» kennzeichnet Ergebnisse, die nur eine Beschreibung durchsuchen.</p>

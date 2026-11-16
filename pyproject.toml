@@ -1,17 +1,38 @@
 [project]
 name = "frag-mich-was"
 version = "0.1.0"
-description = "Static semantic search for Stadt.Geschichte.Basel with marimo WASM on GitHub Pages."
+description = "Static lexical and semantic search for Stadt.Geschichte.Basel with marimo WASM on GitHub Pages."
 readme = "README.md"
 license = "AGPL-3.0-only"
-requires-python = ">=3.12"
+requires-python = "==3.14.*"
 dependencies = [
+    "bm25s==0.3.16",
     "marimo==0.25.2",
-    "pydantic==2.14.3",
+    "pydantic==2.12.5",
 ]
 
 [tool.uv]
 package = false
+# The browser runs on Pyodide 314.0.0, which supplies Python 3.14 and these packages from its own
+# lockfile. Pin the same versions here, so that the tests and the browser run the same code.
+# `tests/test_browser.py` compares these pins with the lockfile that the exported site loads.
+# `bm25s` comes from PyPI. The PEP 723 header of `app.py` pins it.
+constraint-dependencies = [
+    "annotated-types==0.7.0",
+    "docutils==0.22.4",
+    "jedi==0.19.2",
+    "markdown==3.10.2",
+    "narwhals==2.19.0",
+    "numpy==2.4.3",
+    "packaging==26.1",
+    "parso==0.8.6",
+    "pydantic-core==2.41.5",
+    "pygments==2.20.0",
+    "pymdown-extensions==10.21.3",
+    "pyyaml==6.0.3",
+    "typing-extensions==4.15.0",
+    "typing-inspection==0.4.2",
+]
 
 [dependency-groups]
 dev = [
@@ -40,15 +61,16 @@ ignore = ["E501"]
 [tool.ruff.lint.per-file-ignores]
 # A marimo cell shows its last expression.
 "app.py" = ["B018"]
+"compare.py" = ["B018"]
 
 [tool.pytest.ini_options]
 addopts = "--doctest-modules --cov --cov-fail-under=100 -m 'not browser'"
-testpaths = ["app.py", "scripts", "tests"]
+testpaths = ["app.py", "compare.py", "scripts", "tests"]
 pythonpath = ["."]
 markers = ["browser: needs the exported site in dist/, Playwright browsers, and network access"]
 
 [tool.coverage.run]
-source = ["app", "scripts"]
+source = ["app", "compare", "scripts"]
 
 [tool.coverage.report]
 show_missing = true
