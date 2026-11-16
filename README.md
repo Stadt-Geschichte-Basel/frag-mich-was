@@ -21,6 +21,7 @@ You can also ask: “Welche Bedeutung hatte der Rhein für Basel?”
 Related wording can also find relevant passages.
 
 Select a search mode with **Suchmodus**. The control sits below the search form.
+It is a native select list. It keeps its label and its keyboard behaviour. Tab reaches it. A letter key selects an option.
 
 | Mode | What it does | Needs the model |
 | --- | --- | --- |

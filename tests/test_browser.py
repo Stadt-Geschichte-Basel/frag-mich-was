@@ -82,10 +82,10 @@ def search(page: Page, query: str) -> None:
 
 
 def choose_mode(page: Page, label: str) -> None:
-    """Select a search mode with the pointer and wait until the control shows it."""
-    radio = page.get_by_role("radio", name=label)
-    radio.click()
-    expect(radio).to_be_checked()
+    """Select a search mode and wait until the control shows it."""
+    mode = page.get_by_role("combobox", name="Suchmodus")
+    mode.select_option(label=label)
+    expect(mode).to_have_value(label)
 
 
 def is_model_request(url: str) -> bool:
@@ -145,13 +145,10 @@ def test_search_end_to_end(context: BrowserContext, site: str, tmp_path: Path) -
     assert page.get_by_text(
         "Lexikalische und semantische Suche für Basels Geschichte."
     ).is_visible()
-    assert page.get_by_role("group", name="Suchmodus").is_visible()
-    assert [radio.get_attribute("value") for radio in page.get_by_role("radio").all()] == [
-        "Kombiniert",
-        "Lexikalisch",
-        "Semantisch",
-    ]
-    expect(page.get_by_role("radio", name="Kombiniert")).to_be_checked()
+    mode = page.get_by_role("combobox", name="Suchmodus")
+    assert mode.is_visible()
+    assert mode.locator("option").all_inner_texts() == ["Kombiniert", "Lexikalisch", "Semantisch"]
+    expect(mode).to_have_value("Kombiniert")
     assert page.locator('link[rel="canonical"]').count() == 1
     assert page.locator('meta[property^="og:"]').count() == 7
     assert page.locator('meta[name="theme-color"]').get_attribute("content") == "#3a1e3e"
@@ -296,7 +293,7 @@ def test_layout_reflows_at_320px_with_large_text(context: BrowserContext, site: 
             && e.getBoundingClientRect().width > 0
             && e.getBoundingClientRect().right > innerWidth + 1)
         .map(e => e.tagName + ' ' + (e.textContent || '').slice(0, 30))"""
-    assert page.get_by_role("group", name="Suchmodus").is_visible()
+    assert page.get_by_role("combobox", name="Suchmodus").is_visible()
     assert page.evaluate(clipped_script) == []
     # The lexical mode needs no model, so the results show at once.
     choose_mode(page, "Lexikalisch")
@@ -307,44 +304,20 @@ def test_layout_reflows_at_320px_with_large_text(context: BrowserContext, site: 
 
 
 def test_mode_control_works_with_the_keyboard(context: BrowserContext, site: str) -> None:
-    """Tab reaches the options. Arrow keys change the mode. The lexical search needs no model."""
+    """Tab reaches the mode list. A key selects the mode. The lexical search needs no model."""
     errors: list[str] = []
     page = open_page(context, set(), errors)
     page.goto(site)
     page.get_by_role("status").filter(has_text="Forschungsbände").wait_for(timeout=LOAD_TIMEOUT)
-    assert page.get_by_role("group", name="Suchmodus").locator("legend").inner_text() == "Suchmodus"
-    for label in ("Kombiniert", "Lexikalisch", "Semantisch"):
-        assert page.get_by_role("radio", name=label).is_visible()
-    radios = page.get_by_role("radio")
-    assert all(
-        (box := radio.bounding_box()) is not None and box["width"] >= 16 for radio in radios.all()
-    )
+    mode = page.get_by_role("combobox", name="Suchmodus")
+    box = mode.bounding_box()
+    assert box is not None and round(box["height"], 3) >= 44
     page.get_by_role("button", name="Suchen").focus()
     page.keyboard.press("Tab")
-    assert page.evaluate(
-        """() => {
-        let node = document.activeElement;
-        while (node?.shadowRoot?.activeElement) node = node.shadowRoot.activeElement;
-        return node?.getAttribute('role') === 'radio';
-    }"""
-    )
-    target = page.get_by_role("radio", name="Lexikalisch")
-    for _ in range(3):
-        if target.is_checked():
-            break
-        page.keyboard.press("ArrowDown")
-        page.wait_for_timeout(500)
-    expect(target).to_be_checked()
-    assert (
-        page.evaluate(
-            """() => {
-        let node = document.activeElement;
-        while (node?.shadowRoot?.activeElement) node = node.shadowRoot.activeElement;
-        return getComputedStyle(node).outlineWidth;
-    }"""
-        )
-        == "3px"
-    )
+    assert mode.evaluate("element => element.getRootNode().activeElement === element")
+    assert mode.evaluate("element => getComputedStyle(element).outlineWidth") == "3px"
+    page.keyboard.press("L")  # The list selects the option that starts with the typed letter.
+    expect(mode).to_have_value("Lexikalisch")
     search(page, "1501")
     page.locator("ol.sgb-results li").first.wait_for(timeout=LOAD_TIMEOUT)
     texts = [" ".join(text.split()) for text in page.locator("ol.sgb-results li").all_inner_texts()]

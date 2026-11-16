@@ -553,10 +553,10 @@ def _(index):
     mo.stop(index is None or not index.chunks)
     # The control sits outside the form. A change of mode runs the search again with the
     # query that the form last submitted.
-    # marimo names the radio group "Radio Group". The fieldset gives the options a real name.
-    # The options stack, so that they reflow at 320 pixels and with large text.
-    mode = mo.ui.radio(options=MODES, value="Kombiniert")
-    mo.Html(f'<fieldset class="sgb-mode"><legend>Suchmodus</legend>{mode}</fieldset>')
+    # A native select keeps its label, its focus, and its keyboard behaviour. The radio of marimo
+    # names its group "Radio Group" and does not keep the focus on the checked option.
+    mode = mo.ui.dropdown(options=MODES, value="Kombiniert", label="Suchmodus")
+    mode
     return (mode,)
 
 

@@ -118,6 +118,15 @@ input[type="text"] {
   font: inherit;
   min-height: 44px;
 }
+select {
+  border: 1.5px solid var(--sgb-purple);
+  border-radius: 0.2rem;
+  background: #fff;
+  color: var(--sgb-text);
+  font: inherit;
+  min-height: 44px;
+  max-width: 100%;
+}
 marimo-ui-element button, button[data-testid="marimo-plugin-form-submit-button"] {
   background: var(--sgb-purple);
   color: #fff;
@@ -133,21 +142,10 @@ button[data-testid="marimo-plugin-form-submit-button"]:hover:not(:disabled) {
   background: var(--sgb-yellow);
   color: var(--sgb-purple);
 }
-a:focus-visible, input:focus-visible, button:focus-visible, summary:focus-visible {
+a:focus-visible, input:focus-visible, button:focus-visible, select:focus-visible, summary:focus-visible {
   outline: 3px solid var(--sgb-purple);
   outline-offset: 3px;
   box-shadow: 0 0 0 6px var(--sgb-yellow);
-}
-.sgb-mode {
-  border: 0;
-  margin: 1rem 0 0;
-  min-width: 0;
-  padding: 0;
-}
-.sgb-mode legend {
-  font-weight: 500;
-  margin-bottom: 0.5rem;
-  padding: 0;
 }
 .sgb-results {
   list-style: none;
@@ -198,7 +196,7 @@ a:focus-visible, input:focus-visible, button:focus-visible, summary:focus-visibl
   min-height: 44px;
   padding-block: 0.5rem;
 }
-a, button, input, summary {
+a, button, input, select, summary {
   scroll-margin-block: 3rem;
 }
 /* Hide the marimo watermark. It has no class or setting, only this test hook. */
